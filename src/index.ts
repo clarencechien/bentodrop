@@ -8,7 +8,7 @@ import { pairApprove, pairClaim, pairCreate, pairFinish, pairStatus } from "./ro
 import { clearMessages, deleteMessage, handleSend, listMessages, markRead } from "./routes/messages";
 import { createDownloadUrl, createUploadUrl, handleObject } from "./routes/objects";
 import { createToken, handleApiPush, listTokens, revokeToken, updateSettings } from "./routes/tokens";
-import { deleteDevice, handleMe, handleSubscribe, handleTestPush } from "./routes/devices";
+import { deleteDevice, handleMe, handleSubscribe, handleTestPush, renameDevice } from "./routes/devices";
 import { cleanupExpired } from "./cron";
 
 const DEPLOY_HINT =
@@ -96,6 +96,9 @@ async function handleApi(req: Request, env: Env, path: string): Promise<Response
   }
   if ((m = /^\/api\/devices\/([A-Za-z0-9_-]+)$/.exec(path)) && method === "DELETE") {
     return deleteDevice(env, device, m[1]);
+  }
+  if ((m = /^\/api\/devices\/([A-Za-z0-9_-]+)\/label$/.exec(path)) && method === "POST") {
+    return renameDevice(req, env, device, m[1]);
   }
 
   return apiError(404, "not_found");

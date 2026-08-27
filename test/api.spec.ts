@@ -345,6 +345,35 @@ describe("devices", () => {
     expect(await env.DB.prepare("SELECT * FROM subscriptions WHERE device_id = ?").bind(b.deviceId).first()).toBeNull();
   });
 
+  it("renames devices — the current one included — visible to the whole user", async () => {
+    const a = await createDevice("Pixel");
+    const b = await pairNewDevice(a, "MacBook");
+
+    // Rename the OTHER device and the CURRENT device.
+    expect((await apiFetch(`/api/devices/${b.deviceId}/label`, { token: a.token, body: { label: "工作筆電" } })).status).toBe(200);
+    expect((await apiFetch(`/api/devices/${a.deviceId}/label`, { token: a.token, body: { label: "我的手機" } })).status).toBe(200);
+
+    const me = await json(await apiFetch("/api/me", { token: b.token }));
+    const labels = Object.fromEntries(me.devices.map((d: any) => [d.deviceId, d.label]));
+    expect(labels[a.deviceId]).toBe("我的手機");
+    expect(labels[b.deviceId]).toBe("工作筆電");
+
+    // The new label rides along in push receipts / from fields.
+    await subscribeDevice(b);
+    const envelope = await C.encryptTextEnvelope(a.kMaster, "hello");
+    const res = await json(await apiFetch("/api/send", { token: a.token, body: { envelope } }));
+    expect(res.receipts[0].label).toBe("工作筆電");
+  });
+
+  it("rejects empty labels and other users' devices", async () => {
+    const a = await createDevice();
+    const stranger = await createDevice("S", "s");
+    expect((await apiFetch(`/api/devices/${a.deviceId}/label`, { token: a.token, body: { label: "   " } })).status).toBe(400);
+    expect((await apiFetch(`/api/devices/${a.deviceId}/label`, { token: stranger.token, body: { label: "hijack" } })).status).toBe(404);
+    const me = await json(await apiFetch("/api/me", { token: a.token }));
+    expect(me.devices[0].label).toBe("Pixel");
+  });
+
   it("cannot remove another user's device", async () => {
     const a = await createDevice();
     const stranger = await createDevice("S", "s");

@@ -114,6 +114,7 @@ src/                    Worker(TypeScript)
   cron.ts               §10 清理
 public/                 PWA(vanilla ES modules,無建置步驟)
   js/crypto.js          client 加密(BIP39 / HKDF / envelope / ECDH 配對)
+  js/qr.js              配對 QR(vendor/lean-qr.mjs,MIT;測試以 jsQR 解碼驗證)
   js/app.js             SPA:收件匣、送出、配對、備份、設定
   sw.js                 push 解密顯示通知(§5.5/§6.3/§7.3)、shell cache
 test/                   workerd 整合測試(75)
@@ -127,11 +128,11 @@ scripts/                setup / gen-vapid / gen-icons / e2e-server
 - **M2 加密** ✅ K_master/HKDF、envelope、短文字 E2E、備份(顯示+複製+抽 3 詞)
 - **M3 多裝置** ✅ URL+配對碼、三護欄、舊裝置確認、fan-out、410 清理、測試推送
 - **M4 檔案** ✅ 簽名直傳、20MB 上限、client 壓縮(canvas,EXIF 剝除+方向烘焙、HEIC 原檔 fallback)、meta 加密、清理
-- **M5 打磨** ◐ 通知隱私開關、下載/列印備份、失效偵測 UI 已做;QR 產生/掃描、辨認式網格未做
+- **M5 打磨** ◐ 通知隱私開關、下載/列印備份、失效偵測 UI、配對 QR code(掃描用手機原生相機,配對碼經 URL fragment 帶入、不經伺服器)、裝置別名(加入時自訂 + 設定頁隨時改名)已做;辨認式還原網格未做
 - **M6 API** ✅ token 管理、明文模式端點;§12.3 公鑰協定已通(無 CLI,按規格)
 
 ## 已知限制
 
 - iOS 為 experimental(§9):需手動加入主畫面,未在實機驗證。
-- QR code 顯示/掃描留待 M5(配對用 URL + 6 位碼已可用)。
+- 掃描配對 QR 使用手機原生相機(不內建 in-app 掃描器);iOS 上會開在 Safari 分頁。
 - 還原碼在「所有裝置皆遺失」時只能救回金鑰身分,舊訊息過保留期即消失(無帳號系統,§6.8)。

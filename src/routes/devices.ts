@@ -56,6 +56,18 @@ export async function handleMe(env: Env, device: DeviceCtx): Promise<Response> {
   });
 }
 
+/** POST /api/devices/:id/label (device auth) — rename any device of the same user, self included. */
+export async function renameDevice(req: Request, env: Env, device: DeviceCtx, targetId: string): Promise<Response> {
+  const body = await readJson<{ label?: string }>(req);
+  const label = typeof body?.label === "string" ? body.label.trim().slice(0, 64) : "";
+  if (!label) return apiError(400, "bad_label", "別名不可為空");
+  const row = await env.DB.prepare(
+    "UPDATE devices SET label = ? WHERE device_id = ? AND user_id = ? RETURNING device_id",
+  ).bind(label, targetId, device.userId).first();
+  if (!row) return apiError(404, "not_found");
+  return json({ ok: true, label });
+}
+
 /** DELETE /api/devices/:id (device auth) — remove a device of the same user. */
 export async function deleteDevice(env: Env, device: DeviceCtx, targetId: string): Promise<Response> {
   const exists = await env.DB.prepare(

@@ -3,6 +3,7 @@ import * as C from "./crypto.js";
 import { api, ApiError } from "./api.js";
 import { K, kvDelete, kvGet, kvSet } from "./store.js";
 import { compressImage, isHeic, isImage } from "./image.js";
+import { qrSvg } from "./qr.js";
 
 const $app = document.getElementById("app");
 const $nav = document.getElementById("topNav");
@@ -478,14 +479,19 @@ async function renderPairOld() {
     return;
   }
   const joinUrl = `${location.origin}/p/${pair.pairId}`;
+  // The code rides in the URL fragment: it reaches the new device's browser
+  // but never the server (fragments aren't sent in requests). Scanning the QR
+  // proves the same thing typing the code does — you can see this screen.
+  const qrUrl = `${joinUrl}#c=${pair.code}`;
   $body.replaceChildren(el(`
     <div>
+      <div class="qr">${qrSvg(qrUrl)}</div>
       <p class="pairurl">${esc(joinUrl)}</p>
       <p class="paircode">${esc(pair.code.split("").join(" "))}</p>
       <p class="pairmeta">5 分鐘後失效 · 錯 3 次作廢 · 只能用一次</p>
       <div class="timer"><i id="pairTimer" style="width:100%"></i></div>
       <button class="btn ghost" id="copyJoin" type="button">複製網址</button>
-      <div id="pairWait"><p class="btn-note">等待另一台裝置加入…</p></div>
+      <div id="pairWait"><p class="btn-note">用手機相機掃描,或在另一台裝置輸入網址與配對碼</p></div>
     </div>`), backBtn());
   $body.querySelector("#copyJoin").onclick = () => copyText(`${joinUrl}  配對碼 ${pair.code}`);
 
@@ -580,6 +586,7 @@ function renderPairJoin(pairIdFromUrl) {
       <form id="joinForm">
         ${pairIdFromUrl ? "" : `<div class="field"><label>配對網址或代碼</label><input id="jnPairId" autocomplete="off" placeholder="bento.example/p/…" required></div>`}
         <div class="field"><label>6 位配對碼</label><input id="jnCode" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" required></div>
+        <div class="field"><label>這台裝置的別名</label><input id="jnLabel" autocomplete="off" maxlength="64" placeholder="例:工作筆電"></div>
         <button class="btn" type="submit">加入</button>
       </form>
       <div id="joinStatus"></div>
@@ -587,6 +594,10 @@ function renderPairJoin(pairIdFromUrl) {
     </div>`);
   $app.replaceChildren(root);
   root.querySelector("#jnBack").onclick = () => location.assign("/");
+  root.querySelector("#jnLabel").value = guessLabel();
+  // Scanned via QR? The code rides in the fragment (#c=123456) — pre-fill it.
+  const fragCode = /[#&]c=(\d{6})/.exec(location.hash)?.[1];
+  if (fragCode) root.querySelector("#jnCode").value = fragCode;
 
   root.querySelector("#joinForm").onsubmit = async (e) => {
     e.preventDefault();
@@ -601,7 +612,7 @@ function renderPairJoin(pairIdFromUrl) {
     btn.disabled = true;
     try {
       const mine = await C.generateEcdhPair();
-      const label = guessLabel();
+      const label = root.querySelector("#jnLabel").value.trim() || guessLabel();
       await api.pairClaim(pairId, code, mine.publicJwk, label);
       $status.replaceChildren(el(`<p class="btn-note">已送出,等待舊裝置確認…</p>`));
       const finish = async () => {
@@ -836,6 +847,23 @@ async function renderSettings() {
         ${d.maybeDead ? '<span class="dead">可能已失效</span>' : ""}
         <span class="spacer"></span>
       </div>`);
+    const rename = el(`<button class="btn ghost inline" type="button">改名</button>`);
+    rename.onclick = async () => {
+      const label = prompt("裝置別名", d.label ?? "")?.trim();
+      if (!label || label === d.label) return;
+      try {
+        await api.renameDevice(d.deviceId, label);
+        if (d.isSelf) {
+          await kvSet(K.DEVICE_LABEL, label);
+          state.label = label;
+        }
+        toast("已改名");
+        renderSettings();
+      } catch (err) {
+        toast(err.message, true);
+      }
+    };
+    row.append(rename);
     if (!d.isSelf) {
       const rm = el(`<button class="btn ghost inline" type="button">移除</button>`);
       rm.onclick = async () => {
