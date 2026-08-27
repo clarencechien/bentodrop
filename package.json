@@ -6,8 +6,7 @@
   "type": "module",
   "scripts": {
     "dev": "wrangler dev",
-    "deploy": "wrangler d1 migrations apply bentodrop --remote && wrangler deploy",
-    "setup": "node scripts/setup.mjs",
+    "deploy": "node scripts/deploy.mjs",
     "gen-vapid": "node scripts/gen-vapid.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
