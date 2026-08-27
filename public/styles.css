@@ -1,0 +1,150 @@
+/* BentoDrop — design language from the UI/UX mockup v1.
+   Colors come from the bento itself; every one has a functional slot. */
+:root{
+  --box:#E6EDEA;        /* 保溫箱 background */
+  --box-deep:#D3DEDA;
+  --rice:#FCFBF7;       /* card faces */
+  --nori:#172A26;       /* text, lines, dark faces */
+  --nori-soft:#4A605A;
+  --gogo:#00C2A8;       /* actions, delivery */
+  --gogo-deep:#00A28C;
+  --ume:#E0483A;        /* unread, failure — one at a time */
+  --tama:#F0B23C;       /* files, unencrypted marker */
+  --r:14px;
+  --shadow:0 1px 0 rgba(23,42,38,.06), 0 8px 24px -12px rgba(23,42,38,.28);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{-webkit-text-size-adjust:100%}
+body{
+  background:var(--box);
+  color:var(--nori);
+  font-family:"Noto Sans TC","Archivo",system-ui,sans-serif;
+  font-size:15px;line-height:1.65;
+  -webkit-font-smoothing:antialiased;
+  background-image:
+    linear-gradient(var(--box-deep) 1px,transparent 1px),
+    linear-gradient(90deg,var(--box-deep) 1px,transparent 1px);
+  background-size:64px 64px;background-position:-1px -1px;
+  min-height:100vh;
+}
+::selection{background:var(--gogo);color:#fff}
+.wrap{max-width:720px;margin:0 auto;padding:0 18px}
+
+.eyebrow{font-family:"Space Mono",monospace;font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--nori-soft)}
+h1,h2,h3{font-family:"Archivo","Noto Sans TC",sans-serif;line-height:1.1;letter-spacing:-.02em}
+h1{font-weight:900;font-size:clamp(30px,6vw,44px)}
+h2{font-weight:800;font-size:clamp(20px,4vw,27px)}
+h3{font-weight:700;font-size:17px}
+.mono{font-family:"Space Mono",monospace}
+.muted{color:var(--nori-soft)}
+.small{font-size:12.5px}
+
+/* header */
+header.top{position:sticky;top:0;z-index:60;background:rgba(230,237,234,.88);backdrop-filter:blur(12px);border-bottom:2px solid rgba(23,42,38,.12)}
+.top-in{display:flex;align-items:center;gap:12px;height:56px}
+.mark{display:flex;align-items:center;gap:9px;font-weight:900;font-family:"Archivo",sans-serif;font-size:16px;letter-spacing:-.02em;color:var(--nori);text-decoration:none}
+.mark i{width:20px;height:16px;border-radius:3px;border:2px solid var(--nori);background:linear-gradient(var(--gogo),var(--gogo)) left/38% 100% no-repeat,var(--rice);display:block;flex:none}
+.mark-sub{opacity:.7}
+.top-meta{margin-left:auto;display:flex;gap:16px;font-size:13px}
+.top-meta a,.top-meta button{color:var(--nori-soft);text-decoration:none;border:0;background:none;font:inherit;cursor:pointer;border-bottom:1px solid transparent;padding-bottom:1px}
+.top-meta a:hover,.top-meta button:hover{color:var(--nori);border-bottom-color:var(--gogo)}
+
+main{padding:26px 18px 80px}
+
+/* compartments — the bento partition is the layout device */
+.compartment{border:2px solid rgba(23,42,38,.14);border-radius:var(--r);background:var(--rice);padding:20px;box-shadow:var(--shadow)}
+.compartment+.compartment{margin-top:18px}
+
+/* fields & buttons */
+.field{border:2px solid var(--nori);border-radius:10px;padding:11px 13px;background:#fff;margin-top:14px}
+.field label{display:block;font-family:"Space Mono",monospace;font-size:9px;letter-spacing:.12em;color:var(--nori-soft);text-transform:uppercase}
+.field input,.field textarea{width:100%;border:0;outline:0;font:inherit;font-size:15px;background:transparent;margin-top:3px;resize:vertical}
+.btn{display:block;width:100%;margin-top:12px;background:var(--gogo);color:#04302A;border:2px solid var(--nori);border-radius:10px;padding:12px;text-align:center;font-weight:900;font-size:15px;font-family:"Archivo","Noto Sans TC",sans-serif;box-shadow:0 3px 0 var(--nori);cursor:pointer}
+.btn:active{transform:translateY(2px);box-shadow:0 1px 0 var(--nori)}
+.btn:disabled{opacity:.5;cursor:default}
+.btn.ghost{background:transparent;color:var(--nori-soft);box-shadow:none;border-color:rgba(23,42,38,.2);font-weight:700;font-size:13px;padding:10px}
+.btn.danger{background:var(--ume);color:#fff}
+.btn.inline{display:inline-block;width:auto;padding:8px 16px;font-size:13px;margin-top:0}
+.btn-note{text-align:center;font-size:10.5px;color:var(--nori-soft);margin-top:10px;font-family:"Space Mono",monospace;letter-spacing:.04em}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+
+/* inbox */
+.inbox-head{display:flex;align-items:center;gap:8px;margin:4px 0 14px}
+.inbox-head b{font-family:"Archivo",sans-serif;font-size:19px;font-weight:900;letter-spacing:-.02em}
+.inbox-head .cnt{font-family:"Space Mono",monospace;font-size:10px;background:var(--ume);color:#fff;border-radius:9px;padding:1px 6px;font-weight:700}
+.mini{border:2px solid var(--nori);border-radius:9px;background:var(--rice);padding:10px 12px 10px 16px;margin-bottom:9px;position:relative;overflow:hidden;cursor:pointer;width:100%;text-align:left;font:inherit;color:inherit;display:block}
+.mini::before{content:"";position:absolute;left:0;top:0;bottom:0;width:5px;background:var(--gogo)}
+.mini.img::before{background:var(--tama)}
+.mini.plain::before{background:var(--box-deep)}
+.mini .mh{display:flex;align-items:center;gap:6px;font-family:"Space Mono",monospace;font-size:9.5px;letter-spacing:.08em;color:var(--nori-soft)}
+.mini .mt{font-size:13px;font-weight:500;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mini .unread{width:6px;height:6px;border-radius:50%;background:var(--ume);margin-left:auto;flex:none}
+.tagx{font-family:"Space Mono",monospace;font-size:8.5px;letter-spacing:.06em;border:1px solid var(--tama);color:#8A6110;background:#FDF3DF;border-radius:3px;padding:0 4px}
+.empty{display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:10px;padding:36px 8px}
+.empty .ph{width:74px;height:52px;border:2px dashed rgba(23,42,38,.28);border-radius:9px}
+
+/* paste dock */
+.paste-dock{border:2px dashed var(--nori);border-radius:12px;background:#F2F6F4;padding:14px;margin-bottom:18px}
+.paste-dock .big{font-family:"Archivo",sans-serif;font-weight:900;font-size:15px;letter-spacing:-.02em}
+.paste-dock textarea{width:100%;border:2px solid var(--nori);border-radius:10px;background:#fff;font:inherit;font-size:14px;padding:10px;margin-top:10px;min-height:64px;resize:vertical}
+.paste-dock .file-row{display:flex;gap:8px;margin-top:8px;align-items:center;flex-wrap:wrap}
+
+/* receipts */
+.receipts{list-style:none;display:flex;flex-direction:column;gap:2px;margin-top:10px}
+.receipts li{font-family:"Space Mono",monospace;font-size:11px;letter-spacing:.03em;display:flex;gap:9px;align-items:center;color:var(--nori-soft)}
+.receipts li b{color:var(--gogo);font-size:12px}
+.receipts li.fail b{color:var(--ume)}
+
+/* detail */
+.detail-body{font-size:15px;white-space:pre-wrap;word-break:break-word;background:#F4F7F5;border-radius:8px;padding:14px;margin-top:12px}
+.detail-meta{font-family:"Space Mono",monospace;font-size:10px;letter-spacing:.08em;color:var(--nori-soft);margin-top:12px}
+.detail-img{max-width:100%;border-radius:8px;border:2px solid var(--nori);margin-top:12px}
+.url-list{list-style:none;margin-top:8px}
+.url-list a{color:var(--gogo-deep);word-break:break-all}
+
+/* pairing */
+.paircode{font-family:"Space Mono",monospace;font-weight:700;font-size:34px;letter-spacing:.16em;text-align:center;margin-top:16px}
+.pairmeta{text-align:center;font-family:"Space Mono",monospace;font-size:10.5px;color:var(--nori-soft);letter-spacing:.06em;margin-top:5px}
+.pairurl{text-align:center;font-family:"Space Mono",monospace;font-size:13px;font-weight:700;margin-top:12px;word-break:break-all}
+.timer{height:3px;background:var(--box-deep);border-radius:2px;margin-top:14px;overflow:hidden}
+.timer i{display:block;height:100%;background:var(--gogo);transition:width 1s linear}
+
+/* recovery words */
+.words{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:14px}
+@media(min-width:560px){.words{grid-template-columns:1fr 1fr 1fr}}
+.word{border:1.5px solid rgba(23,42,38,.16);border-radius:6px;padding:6px 8px;background:#fff;font-family:"Space Mono",monospace;font-size:12px;display:flex;gap:6px;align-items:baseline}
+.word b{color:#B3BFBB;font-size:9px;font-weight:400;min-width:14px}
+.word input{border:0;outline:0;font:inherit;width:100%;background:transparent}
+.save-opts{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:12px}
+.save-opt{border:1.5px solid rgba(23,42,38,.18);border-radius:7px;padding:8px;text-align:center;font-size:11px;font-weight:700;background:none;font-family:inherit;cursor:pointer}
+.save-opt.pri{background:var(--gogo);border-color:var(--nori);color:#04302A}
+
+/* settings */
+.dev-row{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid rgba(23,42,38,.1)}
+.dev-row:last-child{border-bottom:0}
+.dev-row .lab{font-weight:700}
+.dev-row .meta{font-family:"Space Mono",monospace;font-size:10px;color:var(--nori-soft)}
+.dev-row .dead{color:var(--ume);font-size:10px;font-family:"Space Mono",monospace}
+.dev-row .spacer{margin-left:auto}
+.switch{display:flex;align-items:center;gap:10px;padding:10px 0}
+.switch input{width:20px;height:20px;accent-color:var(--gogo)}
+select{font:inherit;border:2px solid var(--nori);border-radius:8px;padding:6px 10px;background:#fff}
+
+.tok-row{display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid rgba(23,42,38,.1);flex-wrap:wrap}
+.tok-row:last-child{border-bottom:0}
+.token-reveal{font-family:"Space Mono",monospace;font-size:12px;background:#F4F7F5;border:1.5px dashed var(--nori-soft);border-radius:6px;padding:8px;word-break:break-all;margin-top:8px}
+
+/* toast */
+.toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%);background:var(--nori);color:var(--box);font-weight:700;font-size:13.5px;padding:10px 18px;border-radius:9px;z-index:100;box-shadow:var(--shadow)}
+.toast.err{background:var(--ume);color:#fff}
+
+/* modal */
+.modal-back{position:fixed;inset:0;background:rgba(23,42,38,.4);z-index:80;display:flex;align-items:center;justify-content:center;padding:18px}
+.modal{background:var(--rice);border:2px solid var(--nori);border-radius:var(--r);max-width:520px;width:100%;max-height:86vh;overflow:auto;padding:20px;box-shadow:var(--shadow)}
+
+.banner{border:2px solid var(--tama);background:#FDF3DF;border-radius:10px;padding:10px 14px;font-size:13px;margin-top:12px}
+.banner.err{border-color:var(--ume);background:#FBE9E7}
+
+@media (prefers-reduced-motion:reduce){
+  *{animation-duration:.01ms !important;transition-duration:.01ms !important}
+}

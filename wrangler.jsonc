@@ -1,0 +1,48 @@
+// BentoDrop — Cloudflare Worker configuration.
+// Designed for deployment via the Cloudflare GitHub integration (Workers Builds):
+// connect this repo in the Cloudflare dashboard and set the deploy command to
+// `npm run deploy`. See README.md for one-time resource setup (`npm run setup`).
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "bentodrop",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-08-01",
+  "assets": {
+    "directory": "public",
+    "binding": "ASSETS",
+    // The PWA is a single-page app; API routes are handled by the Worker first.
+    "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"]
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "bentodrop",
+      // Placeholder — `npm run setup` replaces this with the real database id.
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "INBOX",
+      "bucket_name": "bentodrop-inbox"
+    }
+  ],
+  "triggers": {
+    // §10: expired messages / pairings cleanup. R2 lifecycle (7d) is the backstop.
+    "crons": ["*/15 * * * *"]
+  },
+  "vars": {
+    // VAPID public key (base64url, uncompressed P-256 point). Set by `npm run setup`.
+    "VAPID_PUBLIC_KEY": "",
+    // `mailto:` contact used as the VAPID `sub` claim.
+    "VAPID_SUBJECT": "mailto:admin@example.com"
+  },
+  "observability": {
+    "enabled": true
+  }
+  // Secrets (set via `wrangler secret put` or `npm run setup`):
+  //   VAPID_PRIVATE_JWK  — P-256 private key as JWK JSON
+  //   URL_SIGNING_SECRET — HMAC secret for short-lived upload/download URLs
+}

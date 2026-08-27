@@ -1,0 +1,256 @@
+// E2E: real browser, real PWA, real Worker (wrangler dev + local D1/R2).
+// Web Push itself is exercised in the workerd integration suite — headless
+// browsers have no push service — everything else here is the real thing.
+import { expect, test } from "@playwright/test";
+import { newDeviceContext, onboard, refreshInbox, sendText } from "./helpers";
+
+test("onboarding: one field, straight into the inbox", async ({ browser, baseURL }) => {
+  const { context, page } = await newDeviceContext(browser, baseURL!);
+  await onboard(page, "clarence");
+  await expect(page.getByText("還沒有便當")).toBeVisible();
+
+  // Identity survives a reload (IndexedDB, §6.8).
+  await page.reload();
+  await expect(page.locator(".paste-dock")).toBeVisible();
+  await context.close();
+});
+
+test("send text to self: encrypt → store → pull → decrypt → copy UI", async ({ browser, baseURL }) => {
+  const { context, page } = await newDeviceContext(browser, baseURL!);
+  await onboard(page);
+  const text = "下午三點的會議改到會議室 B,記得帶那份合約。";
+  await sendText(page, text);
+  await refreshInbox(page);
+
+  const card = page.locator(".mini").first();
+  await expect(card).toContainText("下午三點的會議改到會議室 B");
+  await card.click();
+
+  // Detail modal: decrypted body + a manual copy button (§7.2: never rely on auto-copy).
+  const modal = page.locator(".modal");
+  await expect(modal.locator(".detail-body")).toHaveText(text);
+  await expect(modal.getByRole("button", { name: "複製" })).toBeVisible();
+  await context.close();
+});
+
+test("https URL gets an open action; never auto-navigates (§7.2.1)", async ({ browser, baseURL }) => {
+  const { context, page } = await newDeviceContext(browser, baseURL!);
+  await onboard(page);
+  await sendText(page, "https://example.com/spec");
+  await refreshInbox(page);
+  await page.locator(".mini").first().click();
+
+  const modal = page.locator(".modal");
+  const open = modal.getByRole("link", { name: "開啟連結" });
+  await expect(open).toHaveAttribute("href", "https://example.com/spec");
+  await expect(open).toHaveAttribute("rel", /noopener/);
+  // We are still on the app page — no auto navigation happened.
+  expect(new URL(page.url()).pathname).toBe("/");
+  await context.close();
+});
+
+test("javascript: URL is treated as plain text (whitelist)", async ({ browser, baseURL }) => {
+  const { context, page } = await newDeviceContext(browser, baseURL!);
+  await onboard(page);
+  await sendText(page, "javascript:alert(1)");
+  await refreshInbox(page);
+  await page.locator(".mini").first().click();
+  const modal = page.locator(".modal");
+  await expect(modal.getByRole("link", { name: "開啟連結" })).toHaveCount(0);
+  await expect(modal.getByRole("button", { name: "複製" })).toBeVisible();
+  await context.close();
+});
+
+test("delete removes the message everywhere (§10.1)", async ({ browser, baseURL }) => {
+  const { context, page } = await newDeviceContext(browser, baseURL!);
+  await onboard(page);
+  await sendText(page, "to be deleted");
+  await refreshInbox(page);
+  await page.locator(".mini").first().click();
+  await page.getByRole("button", { name: "刪除(所有裝置)" }).click();
+  await expect(page.getByText("還沒有便當")).toBeVisible();
+  await context.close();
+});
+
+test("file send: encrypt+upload, then download+decrypt (§3.2)", async ({ browser, baseURL }) => {
+  const { context, page } = await newDeviceContext(browser, baseURL!);
+  await onboard(page);
+
+  await page.locator("#fileInput").setInputFiles({
+    name: "秘密筆記.txt",
+    mimeType: "text/plain",
+    buffer: Buffer.from("機密內容:momo 是一隻貓。"),
+  });
+  await expect(page.locator("#sendStatus")).toContainText(/已送達|✓/);
+  await refreshInbox(page);
+
+  const card = page.locator(".mini.img").first();
+  await expect(card).toContainText("秘密筆記.txt"); // decrypted meta (§5.3)
+  await card.click();
+
+  const modal = page.locator(".modal");
+  await modal.getByRole("button", { name: "下載並解密" }).click();
+  await expect(modal.getByRole("link", { name: "儲存檔案" })).toBeVisible();
+  await context.close();
+});
+
+test("pairing (§6.6): QR-less URL+code flow moves K_master to a second device", async ({ browser, baseURL }) => {
+  test.setTimeout(120_000);
+  const a = await newDeviceContext(browser, baseURL!);
+  await onboard(a.page, "clarence");
+
+  // Old device creates the pairing.
+  await a.page.getByRole("button", { name: "加裝置" }).click();
+  await expect(a.page.locator(".paircode")).toBeVisible();
+  const joinUrl = (await a.page.locator(".pairurl").innerText()).trim();
+  const code = (await a.page.locator(".paircode").innerText()).replace(/\s/g, "");
+  expect(code).toMatch(/^\d{6}$/);
+  await expect(a.page.getByText("5 分鐘後失效 · 錯 3 次作廢 · 只能用一次")).toBeVisible();
+
+  // New device opens the URL and enters the code.
+  const b = await newDeviceContext(browser, baseURL!);
+  await b.page.goto(joinUrl);
+  await b.page.locator("#jnCode").fill(code);
+  await b.page.getByRole("button", { name: "加入" }).click();
+
+  // Old device must explicitly confirm (§6.6).
+  await expect(a.page.getByText("要求配對")).toBeVisible({ timeout: 20_000 });
+  await a.page.getByRole("button", { name: "確認配對" }).click();
+
+  // New device lands in the inbox with a working K_master.
+  await expect(b.page.locator(".paste-dock")).toBeVisible({ timeout: 20_000 });
+
+  // §6.5: after the second device, the old device gets a backup nudge.
+  await expect(a.page.getByText("你現在有兩台裝置了")).toBeVisible({ timeout: 10_000 });
+  await a.page.getByRole("button", { name: "備份還原碼" }).click();
+  await expect(a.page.locator(".word")).toHaveCount(12);
+
+  // Cross-device decryption: B sends, A pulls and reads plaintext.
+  const secret = `配對後的悄悄話 ${Date.now()}`;
+  await sendText(b.page, secret);
+  await a.page.goto("/");
+  await refreshInbox(a.page);
+  await expect(a.page.locator(".mini").first()).toContainText("配對後的悄悄話");
+
+  await a.context.close();
+  await b.context.close();
+});
+
+test("backup verify: 3 sampled words gate the done state (§6.5.1)", async ({ browser, baseURL }) => {
+  const { context, page } = await newDeviceContext(browser, baseURL!);
+  await onboard(page);
+  await page.getByRole("button", { name: "設定" }).click();
+  await page.getByRole("button", { name: "備份還原碼" }).click();
+  await expect(page.locator(".word")).toHaveCount(12);
+  const words = await page.locator(".word").allInnerTexts();
+  const cleaned = words.map((w) => w.replace(/^\d+/, "").trim());
+
+  await page.getByRole("button", { name: "存好了,抽 3 個字驗證" }).click();
+  const inputs = page.locator(".modal input");
+  await expect(inputs).toHaveCount(3);
+  for (let i = 0; i < 3; i++) {
+    const idx = Number(await inputs.nth(i).getAttribute("data-idx"));
+    await inputs.nth(i).fill(cleaned[idx]);
+  }
+  await page.locator(".modal").getByRole("button", { name: "驗證" }).click();
+  await expect(page.locator(".paste-dock")).toBeVisible();
+
+  // Settings no longer nags about backup.
+  await page.getByRole("button", { name: "設定" }).click();
+  await expect(page.getByRole("button", { name: "重新顯示還原碼" })).toBeVisible();
+  await context.close();
+});
+
+test("restore from the 12 words re-derives the same key material", async ({ browser, baseURL }) => {
+  // Device 1: onboard, read the words.
+  const a = await newDeviceContext(browser, baseURL!);
+  await onboard(a.page, "restorer");
+  await a.page.getByRole("button", { name: "設定" }).click();
+  await a.page.getByRole("button", { name: "備份還原碼" }).click();
+  const words = (await a.page.locator(".word").allInnerTexts()).map((w) => w.replace(/^\d+/, "").trim());
+  await a.context.close();
+
+  // Device 2: restore with the words — a wrong word is rejected by checksum.
+  const b = await newDeviceContext(browser, baseURL!);
+  await b.page.goto("/");
+  await b.page.getByRole("button", { name: "用還原碼還原" }).click();
+  await b.page.locator("#rsName").fill("restorer");
+  const inputs = b.page.locator("#rsGrid input");
+  for (let i = 0; i < 12; i++) await inputs.nth(i).fill(words[i]);
+  // Sabotage one word first → checksum error toast.
+  await inputs.nth(4).fill(words[4] === "abandon" ? "zoo" : "abandon");
+  await b.page.getByRole("button", { name: "還原" }).click();
+  await expect(b.page.locator("#toast")).toBeVisible();
+  // Fix it → restore succeeds into the inbox.
+  await inputs.nth(4).fill(words[4]);
+  await b.page.getByRole("button", { name: "還原" }).click();
+  await expect(b.page.locator(".paste-dock")).toBeVisible();
+  await b.context.close();
+});
+
+test("settings: retention, API token lifecycle with 未加密 marking (§12)", async ({ browser, baseURL }) => {
+  const { context, page } = await newDeviceContext(browser, baseURL!);
+  await onboard(page, "settings-user");
+  await page.getByRole("button", { name: "設定" }).click();
+
+  // 保留期選項 (§10.2)
+  await page.locator("#stRetention").selectOption("30");
+  await expect(page.locator("#toast")).toContainText("已更新保留期");
+
+  // Create a plaintext token — warning must be visible before creation (§12.4).
+  await page.locator("#tokLabel").fill("NAS 備份腳本");
+  await page.locator("#tokPlain").check();
+  await expect(page.locator("#tokPlainWarn")).toBeVisible();
+  await page.getByRole("button", { name: "建立" }).click();
+  await expect(page.locator(".token-reveal")).toContainText("bd_");
+  const revealText = await page.locator(".token-reveal").innerText();
+  const token = revealText.match(/bd_[A-Za-z0-9_-]+/)![0];
+
+  // Token list shows the 未加密 tag; the raw token is not in the list.
+  const row = page.locator(".tok-row", { hasText: "NAS 備份腳本" });
+  await expect(row.locator(".tagx")).toHaveText("未加密");
+
+  // The token actually pushes (server side) and lands in the inbox tagged.
+  const res = await page.request.post("/api/push", {
+    headers: { authorization: `Bearer ${token}` },
+    data: { text: "每日備份完成,共 42 GB" },
+  });
+  expect(res.status()).toBe(200);
+  await page.getByRole("button", { name: "回收件匣" }).click();
+  await refreshInbox(page);
+  const card = page.locator(".mini", { hasText: "每日備份完成" });
+  await expect(card.locator(".tagx")).toHaveText("未加密");
+  await expect(card).toContainText("NAS 備份腳本");
+
+  // Revoke → token stops working immediately.
+  await page.getByRole("button", { name: "設定" }).click();
+  await page.locator(".tok-row", { hasText: "NAS 備份腳本" }).getByRole("button", { name: "撤銷" }).click();
+  await expect(page.locator(".tok-row", { hasText: "NAS 備份腳本" })).toContainText("已撤銷");
+  const res2 = await page.request.post("/api/push", {
+    headers: { authorization: `Bearer ${token}` },
+    data: { text: "should fail" },
+  });
+  expect(res2.status()).toBe(401);
+  await context.close();
+});
+
+test("service worker registers and the manifest is installable", async ({ browser, baseURL }) => {
+  const { context, page } = await newDeviceContext(browser, baseURL!);
+  await onboard(page, "sw-user");
+  const swReady = await page.evaluate(async () => {
+    if (!("serviceWorker" in navigator)) return "unsupported";
+    const reg = await Promise.race([
+      navigator.serviceWorker.ready.then(() => "ready"),
+      new Promise((r) => setTimeout(() => r("timeout"), 15000)),
+    ]);
+    return reg;
+  });
+  expect(swReady).toBe("ready");
+
+  const manifest = await page.request.get("/manifest.webmanifest");
+  expect(manifest.status()).toBe(200);
+  const m = await manifest.json();
+  expect(m.display).toBe("standalone");
+  expect(m.icons.length).toBeGreaterThanOrEqual(2);
+  await context.close();
+});
