@@ -9,8 +9,8 @@
 import { decryptTextEnvelope, decryptFileMeta, deriveKmaster, detectTextKind } from "./js/crypto.js";
 import { K, kvGet } from "./js/store.js";
 
-const SHELL_CACHE = "bentodrop-shell-v1";
-const SHELL = ["/", "/styles.css", "/js/app.js", "/js/crypto.js", "/js/api.js", "/js/store.js", "/js/image.js", "/js/wordlist.js", "/manifest.webmanifest"];
+const SHELL_CACHE = "bentodrop-shell-v2";
+const SHELL = ["/", "/styles.css", "/js/app.js", "/js/crypto.js", "/js/api.js", "/js/store.js", "/js/image.js", "/js/wordlist.js", "/js/qr.js", "/js/vendor/lean-qr.mjs", "/manifest.webmanifest"];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(SHELL_CACHE).then((c) => c.addAll(SHELL)).catch(() => {}));

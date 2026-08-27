@@ -8,6 +8,9 @@
   "name": "bentodrop",
   "main": "src/index.ts",
   "compatibility_date": "2026-08-01",
+  // Serve only on the custom domain — no *.workers.dev URL, no preview URLs.
+  "workers_dev": false,
+  "preview_urls": false,
   "assets": {
     "directory": "public",
     "binding": "ASSETS",

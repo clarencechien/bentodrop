@@ -47,6 +47,7 @@ export const api = {
   settings: (retentionDays) => call("POST", "/api/settings", { retention_days: retentionDays }),
   testPush: (deviceId) => call("POST", "/api/test-push", deviceId ? { deviceId } : {}),
   deleteDevice: (id) => call("DELETE", `/api/devices/${id}`),
+  renameDevice: (id, label) => call("POST", `/api/devices/${id}/label`, { label }),
   createToken: (label, plaintextOk, rateLimit) =>
     call("POST", "/api/tokens", { label, plaintext_ok: plaintextOk, rate_limit: rateLimit }),
   listTokens: () => call("GET", "/api/tokens"),

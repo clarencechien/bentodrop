@@ -19,6 +19,8 @@
     "@cloudflare/workers-types": "^5.20260827.1",
     "@playwright/test": "^1.58.0",
     "@scure/bip39": "^2.3.0",
+    "jsqr": "^1.4.0",
+    "lean-qr": "^2.7.3",
     "typescript": "^7.0.2",
     "vitest": "^4.1.11",
     "wrangler": "^4.127.0"

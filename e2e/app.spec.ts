@@ -99,22 +99,26 @@ test("pairing (§6.6): QR-less URL+code flow moves K_master to a second device",
   const a = await newDeviceContext(browser, baseURL!);
   await onboard(a.page, "clarence");
 
-  // Old device creates the pairing.
+  // Old device creates the pairing: QR + URL + code all shown.
   await a.page.getByRole("button", { name: "加裝置" }).click();
   await expect(a.page.locator(".paircode")).toBeVisible();
+  await expect(a.page.locator(".qr svg")).toBeVisible();
   const joinUrl = (await a.page.locator(".pairurl").innerText()).trim();
   const code = (await a.page.locator(".paircode").innerText()).replace(/\s/g, "");
   expect(code).toMatch(/^\d{6}$/);
   await expect(a.page.getByText("5 分鐘後失效 · 錯 3 次作廢 · 只能用一次")).toBeVisible();
 
-  // New device opens the URL and enters the code.
+  // New device arrives via the QR URL — the fragment pre-fills the code,
+  // and the device alias is editable before joining.
   const b = await newDeviceContext(browser, baseURL!);
-  await b.page.goto(joinUrl);
-  await b.page.locator("#jnCode").fill(code);
+  await b.page.goto(`${joinUrl}#c=${code}`);
+  await expect(b.page.locator("#jnCode")).toHaveValue(code);
+  await b.page.locator("#jnLabel").fill("工作筆電");
   await b.page.getByRole("button", { name: "加入" }).click();
 
-  // Old device must explicitly confirm (§6.6).
+  // Old device must explicitly confirm, and sees the chosen alias (§6.6).
   await expect(a.page.getByText("要求配對")).toBeVisible({ timeout: 20_000 });
+  await expect(a.page.getByText("工作筆電")).toBeVisible();
   await a.page.getByRole("button", { name: "確認配對" }).click();
 
   // New device lands in the inbox with a working K_master.
@@ -125,15 +129,29 @@ test("pairing (§6.6): QR-less URL+code flow moves K_master to a second device",
   await a.page.getByRole("button", { name: "備份還原碼" }).click();
   await expect(a.page.locator(".word")).toHaveCount(12);
 
-  // Cross-device decryption: B sends, A pulls and reads plaintext.
+  // Cross-device decryption: B sends, A pulls and reads plaintext — the
+  // sender shows up under its chosen alias.
   const secret = `配對後的悄悄話 ${Date.now()}`;
   await sendText(b.page, secret);
   await a.page.goto("/");
   await refreshInbox(a.page);
-  await expect(a.page.locator(".mini").first()).toContainText("配對後的悄悄話");
+  const received = a.page.locator(".mini").first();
+  await expect(received).toContainText("配對後的悄悄話");
+  await expect(received).toContainText("工作筆電");
 
   await a.context.close();
   await b.context.close();
+});
+
+test("device rename: current device and peers, from settings", async ({ browser, baseURL }) => {
+  const { context, page } = await newDeviceContext(browser, baseURL!);
+  await onboard(page, "renamer");
+  await page.getByRole("button", { name: "設定" }).click();
+
+  page.once("dialog", (d) => d.accept("我的桌機"));
+  await page.locator(".dev-row").first().getByRole("button", { name: "改名" }).click();
+  await expect(page.locator(".dev-row").first()).toContainText("我的桌機(這台)");
+  await context.close();
 });
 
 test("backup verify: 3 sampled words gate the done state (§6.5.1)", async ({ browser, baseURL }) => {
