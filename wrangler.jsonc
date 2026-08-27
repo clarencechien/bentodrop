@@ -1,7 +1,8 @@
 // BentoDrop — Cloudflare Worker configuration.
 // Designed for deployment via the Cloudflare GitHub integration (Workers Builds):
 // connect this repo in the Cloudflare dashboard and set the deploy command to
-// `npm run deploy`. See README.md for one-time resource setup (`npm run setup`).
+// `npm run deploy` — it provisions D1/R2, generates secrets on first run, and
+// applies migrations (scripts/deploy.mjs). Zero manual setup required.
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "bentodrop",
@@ -18,8 +19,8 @@
     {
       "binding": "DB",
       "database_name": "bentodrop",
-      // Placeholder — `npm run setup` replaces this with the real database id.
-      "database_id": "00000000-0000-0000-0000-000000000000",
+      // No database_id on purpose: Cloudflare auto-provisions the database on
+      // the first `wrangler deploy` (same as the R2 bucket below).
       "migrations_dir": "migrations"
     }
   ],
@@ -34,15 +35,14 @@
     "crons": ["*/15 * * * *"]
   },
   "vars": {
-    // VAPID public key (base64url, uncompressed P-256 point). Set by `npm run setup`.
-    "VAPID_PUBLIC_KEY": "",
     // `mailto:` contact used as the VAPID `sub` claim.
     "VAPID_SUBJECT": "mailto:admin@example.com"
   },
   "observability": {
     "enabled": true
   }
-  // Secrets (set via `wrangler secret put` or `npm run setup`):
-  //   VAPID_PRIVATE_JWK  — P-256 private key as JWK JSON
+  // Secrets — auto-generated on first `npm run deploy` (scripts/deploy.mjs):
+  //   VAPID_PUBLIC_KEY   — base64url uncompressed P-256 point
+  //   VAPID_PRIVATE_JWK  — matching private key as JWK JSON
   //   URL_SIGNING_SECRET — HMAC secret for short-lived upload/download URLs
 }

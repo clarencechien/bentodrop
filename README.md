@@ -35,39 +35,25 @@ Cloudflare Workers + D1 + R2 + Web Push(VAPID),全 PWA,無帳號系統。
 
 ## 用 Cloudflare 的 GitHub 整合上架(Workers Builds)
 
-推薦流程:連結 GitHub repo 之後,每次 push 自動建置部署。
-
-### 一次性設定
-
-```bash
-npm ci
-npx wrangler login          # 或設定 CLOUDFLARE_API_TOKEN
-npm run setup               # 建 D1、R2(含 lifecycle)、產生 VAPID 金鑰、設 secrets、套 migrations
-git add wrangler.jsonc && git commit -m "chore: bind cloudflare resources" && git push
-```
-
-`npm run setup` 做的事:
-
-| 動作 | 說明 |
-|---|---|
-| `wrangler d1 create bentodrop` | 並把 `database_id` 寫回 `wrangler.jsonc` |
-| `wrangler r2 bucket create bentodrop-inbox` | 加 lifecycle 規則:`u/` prefix 7 天自動刪(§4.1) |
-| 產生 VAPID P-256 金鑰 | 公鑰寫入 `wrangler.jsonc` vars;私鑰 `wrangler secret put VAPID_PRIVATE_JWK` |
-| `URL_SIGNING_SECRET` | 隨機產生並設為 secret |
-| `wrangler d1 migrations apply --remote` | 套用 schema |
-
-> ⚠️ VAPID 金鑰一換,**所有**既有推送訂閱全部失效(§8.5)。金鑰視為一次性決定,不要重跑 setup 覆蓋。
-
-### 連結 GitHub
+**零設定**:不需要事先開任何資源,連結 repo 就能上線。
 
 1. Cloudflare dashboard → **Workers & Pages → Create → Workers → Import a repository**
 2. 選這個 repo / 分支
 3. Build command:`npm ci`
-4. Deploy command:`npm run deploy`(會先跑 `wrangler d1 migrations apply bentodrop --remote` 再 `wrangler deploy`,schema 變更隨 push 自動套用)
+4. **Deploy command:`npm run deploy`**(這行很重要,不要用預設的 `npx wrangler deploy`)
 
-之後每次 push 就是一次部署。也可以不走 dashboard,直接 `npm run deploy`。
+`npm run deploy`(`scripts/deploy.mjs`)每次 push 會依序做:
 
-也可以用上面的 **Deploy to Cloudflare** 按鈕:它會依 `wrangler.jsonc` 自動開好 D1 / R2 並建立連動的 repo;部署完仍需手動設定兩個 secrets(`VAPID_PRIVATE_JWK`、`URL_SIGNING_SECRET`,可用 `npm run gen-vapid` 產生)並套 migrations,或直接跑一次 `npm run setup`。
+| 步驟 | 說明 |
+|---|---|
+| `wrangler deploy` | `wrangler.jsonc` 刻意不寫死 D1 `database_id`,首次部署時 Cloudflare 會**自動開通** D1(`bentodrop`)與 R2(`bentodrop-inbox`) |
+| 補齊 secrets | 只在缺少時產生:VAPID P-256 金鑰對(`VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_JWK`)與 `URL_SIGNING_SECRET`;已存在就完全不動 |
+| `wrangler d1 migrations apply --remote` | schema 變更隨 push 自動套用 |
+| R2 lifecycle 保險 | `u/` prefix 7 天自動刪(§4.1),冪等 |
+
+> ⚠️ VAPID 金鑰一換,**所有**既有推送訂閱全部失效(§8.5)。deploy script 因此絕不覆蓋已存在的 secrets;不要手動刪除它們。
+
+之後每次 push 就是一次部署。也可以不走 dashboard,在本機 `npx wrangler login` 後直接 `npm run deploy`。上面的 **Deploy to Cloudflare** 按鈕亦可:它會依 `wrangler.jsonc` 開好資源並建立連動 repo,部署指令同樣設成 `npm run deploy` 即可。
 
 ### 本機開發
 
