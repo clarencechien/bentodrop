@@ -11,11 +11,41 @@ import { createToken, handleApiPush, listTokens, revokeToken, updateSettings } f
 import { deleteDevice, handleMe, handleSubscribe, handleTestPush } from "./routes/devices";
 import { cleanupExpired } from "./cron";
 
+const DEPLOY_HINT =
+  "Deployment is incomplete. Set the Workers Builds deploy command to `npm run deploy` " +
+  "(dashboard → this Worker → Settings → Build) and redeploy — it applies D1 migrations " +
+  "and generates the VAPID / URL-signing secrets.";
+
+/** Readiness probe: reports exactly which provisioning step is missing. */
+async function handleHealth(env: Env): Promise<Response> {
+  const checks = {
+    d1: false,
+    migrated: false,
+    vapidKeys: Boolean(env.VAPID_PUBLIC_KEY && env.VAPID_PRIVATE_JWK),
+    urlSigningSecret: Boolean(env.URL_SIGNING_SECRET),
+  };
+  try {
+    checks.d1 = true;
+    const t = await env.DB.prepare(
+      "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'users'",
+    ).first();
+    checks.migrated = t !== null;
+  } catch {
+    checks.d1 = false;
+  }
+  const ok = Object.values(checks).every(Boolean);
+  return json(ok ? { ok, ts: Date.now(), checks } : { ok, ts: Date.now(), checks, hint: DEPLOY_HINT }, ok ? 200 : 503);
+}
+
+function isMissingSchema(err: unknown): boolean {
+  return err instanceof Error && /no such table/i.test(err.message + ((err.cause as Error | undefined)?.message ?? ""));
+}
+
 async function handleApi(req: Request, env: Env, path: string): Promise<Response> {
   const method = req.method;
 
   // ── Public endpoints ────────────────────────────────────────────────
-  if (path === "/api/health" && method === "GET") return json({ ok: true, ts: Date.now() });
+  if (path === "/api/health" && method === "GET") return handleHealth(env);
   if (path === "/api/vapid" && method === "GET") return json({ vapidPublicKey: env.VAPID_PUBLIC_KEY });
   if (path === "/api/register" && method === "POST") return handleRegister(req, env);
   if (path === "/api/pair/claim" && method === "POST") return pairClaim(req, env);
@@ -79,6 +109,7 @@ export default {
         return await handleApi(req, env, url.pathname);
       } catch (err) {
         console.error("api error", url.pathname, err);
+        if (isMissingSchema(err)) return apiError(503, "not_migrated", DEPLOY_HINT);
         return apiError(500, "internal_error");
       }
     }
