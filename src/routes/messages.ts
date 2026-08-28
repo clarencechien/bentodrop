@@ -33,13 +33,35 @@ async function retentionMs(env: Env, userId: string): Promise<number> {
   return (row?.retention_days ?? 7) * 24 * 3600 * 1000;
 }
 
-/** POST /api/send (device auth) — §3.1 text path and §3.2 file completion. */
+/**
+ * POST /api/send (device auth) — §3.1 text path and §3.2 file completion.
+ * With `to` set, delivers to a CONTACT instead of the sender's own devices
+ * (§11): the envelope must be ecdh-p256-wrapped, and the RECIPIENT must
+ * still list the sender as a contact (that's the block switch).
+ */
 export async function handleSend(req: Request, env: Env, device: DeviceCtx): Promise<Response> {
-  const body = await readJson<{ envelope?: unknown }>(req);
+  const body = await readJson<{ envelope?: unknown; to?: string }>(req);
   const envelope = body?.envelope;
   if (!validEnvelopeShape(envelope)) return apiError(400, "bad_envelope");
   if (envelope.plain) return apiError(400, "bad_envelope", "plaintext mode is API-token only");
   if (!envelope.wrap || typeof envelope.wrap.cek !== "string") return apiError(400, "bad_envelope", "missing wrap");
+
+  let toUser = device.userId;
+  let fromUser: string | null = null;
+  let fromLabel: string | null = device.label;
+  if (typeof body?.to === "string" && body.to !== device.userId) {
+    if (envelope.wrap.mode !== "ecdh-p256") {
+      return apiError(400, "bad_envelope", "cross-user envelopes must use wrap.mode ecdh-p256");
+    }
+    // Authorization runs against the RECIPIENT's contact list (§11).
+    const rel = await env.DB.prepare(
+      "SELECT label FROM contacts WHERE user_id = ? AND peer_user_id = ?",
+    ).bind(body.to, device.userId).first<{ label: string }>();
+    if (!rel) return apiError(403, "not_contact", "對方尚未加你為好友,或已解除");
+    toUser = body.to;
+    fromUser = device.userId;
+    fromLabel = rel.label; // how the recipient names the sender
+  }
 
   const now = Date.now();
   const encoded = JSON.stringify(envelope);
@@ -72,28 +94,34 @@ export async function handleSend(req: Request, env: Env, device: DeviceCtx): Pro
     ttl = PUSH_TTL_FILE_S;
   }
 
-  const expiresAt = now + (await retentionMs(env, device.userId));
+  // Retention follows the RECIPIENT's setting (§10.2).
+  const expiresAt = now + (await retentionMs(env, toUser));
   await env.DB.prepare(
-    `INSERT INTO messages (msg_id, user_id, from_device, kind, envelope, r2_key, size_bytes, expires_at, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-  ).bind(envelope.id, device.userId, device.deviceId, envelope.kind, encoded, r2Key, sizeBytes, expiresAt, now).run();
+    `INSERT INTO messages (msg_id, user_id, from_device, from_user, kind, envelope, r2_key, size_bytes, expires_at, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).bind(envelope.id, toUser, device.deviceId, fromUser, envelope.kind, encoded, r2Key, sizeBytes, expiresAt, now).run();
 
   const receipts = await fanoutPush(
-    env, device.userId,
-    { t: "msg", from: device.label, msgId: envelope.id, envelope },
-    ttl, device.deviceId,
+    env, toUser,
+    { t: "msg", from: fromLabel, msgId: envelope.id, envelope, contact: fromUser !== null },
+    ttl, fromUser === null ? device.deviceId : undefined,
   );
-  return json({ msgId: envelope.id, expiresAt, receipts });
+  // Don't leak a contact's device ids/names back to the sender.
+  const visible = fromUser === null
+    ? receipts
+    : receipts.map((r, i) => ({ deviceId: `peer-${i + 1}`, label: null, ok: r.ok, status: r.status }));
+  return json({ msgId: envelope.id, expiresAt, receipts: visible });
 }
 
 /** GET /api/messages (device auth) — inbox pull (§10.1: open-time refresh, no tombstones). */
 export async function listMessages(env: Env, device: DeviceCtx): Promise<Response> {
   const rows = await env.DB.prepare(
-    `SELECT m.msg_id, m.from_device, m.via_token, m.kind, m.envelope, m.size_bytes, m.expires_at, m.read_at, m.created_at,
-            d.label AS from_label, t.label AS token_label
+    `SELECT m.msg_id, m.from_device, m.from_user, m.via_token, m.kind, m.envelope, m.size_bytes, m.expires_at, m.read_at, m.created_at,
+            d.label AS from_label, t.label AS token_label, c.label AS contact_label
        FROM messages m
        LEFT JOIN devices d ON d.device_id = m.from_device
        LEFT JOIN api_tokens t ON t.token_id = m.via_token
+       LEFT JOIN contacts c ON c.user_id = m.user_id AND c.peer_user_id = m.from_user
       WHERE m.user_id = ? AND m.expires_at > ?
       ORDER BY m.created_at DESC LIMIT 200`,
   ).bind(device.userId, Date.now()).all();
@@ -102,7 +130,10 @@ export async function listMessages(env: Env, device: DeviceCtx): Promise<Respons
       msgId: r.msg_id,
       kind: r.kind,
       envelope: JSON.parse(r.envelope),
-      from: r.from_label ?? r.token_label ?? null,
+      // Cross-user messages show under MY label for the sender, never the
+      // sender's own device names.
+      from: r.from_user !== null ? (r.contact_label ?? "已解除的好友") : (r.from_label ?? r.token_label ?? null),
+      fromContact: r.from_user !== null,
       viaToken: r.via_token !== null,
       sizeBytes: r.size_bytes,
       expiresAt: r.expires_at,

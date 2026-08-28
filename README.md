@@ -23,7 +23,8 @@ Cloudflare Workers + D1 + R2 + Web Push(VAPID),全 PWA,無帳號系統。
 - **檔案/圖片(≤20MB)**:client 加密 → 取得簽名上傳 URL → 直傳 R2 → `/api/send` 回報,Worker `HEAD` 驗證大小(§4.3)→ push 只送指標。
 - **加密(§5)**:每則訊息隨機 CEK(AES-256-GCM),CEK 由 `K_master` 包裹(`wrap.mode: "self"`);`K_master` 由 128-bit 隨機值經 HKDF-SHA256 導出;還原碼為 BIP39 12 詞(§6.2);檔名與 MIME 也加密(`meta.ct`)。
 - **配對(§6.6)**:URL + 6 位數字碼,三條護欄(TTL 5 分鐘、錯 3 次作廢、用完即焚)+ 每小時 5 次限制;`K_master` 以臨時 ECDH P-256 + HKDF 包裹傳遞,Worker 只見密文。
-- **API 推送(§12)**:send-only token;明文模式 per-token 顯式開啟、純文字 ≤2000 bytes、不落 R2,UI 標示「未加密」。
+- **API 推送(§12)**:send-only token;明文模式 per-token 顯式開啟、純文字 ≤2000 bytes、不落 R2,UI 標示「未加密」,保留期上限 24 小時(§14 待決事項已定案)。加密模式(§12.3)由 `cli/bentodrop-push.mjs` 實作:token 只拿身分**公鑰**,外洩也讀不到任何內容。
+- **跨使用者(§11 Phase 2)**:身分金鑰為 user 層級(公鑰存伺服器、私鑰以 K_master 包裹後同步,伺服器讀不到);加好友沿用 URL+邀請碼機制(TTL 放寬到 30 分鐘,其餘護欄相同);跨 user envelope 用 `wrap.mode: "ecdh-p256"`(臨時金鑰 + HKDF);授權以**收件人**的好友名單為準 — 解除好友即刻擋下對方來訊。送達回執對寄件者隱藏對方裝置名稱。
 - **清理(§10)**:Cron 每 15 分鐘刪過期訊息(D1 列 + R2 物件)與過期配對;R2 lifecycle(7 天)為第二道保險。
 
 ### 與規格的兩個實作註記
@@ -86,6 +87,9 @@ npm run test:all    # 以上全部
 | `webpush.spec.ts` | RFC 8291 aes128gcm 加密往返、header 格式、4KB 預算;RFC 8292 VAPID JWT 簽章驗證 |
 | `api.spec.ts` | 註冊/認證、文字路徑全鏈路(加密→送出→攔截推送→解 transport→解 envelope)、發送端排除、收件匣已讀保留、跨 user 隔離、檔案路徑全鏈路(§4.3 大小驗證/物件缺失/謊報大小刪物件/簽名竄改/跨 user key)、410 立即刪訂閱、連續失敗 5 次刪除、測試推送、保留期設定 |
 | `pairing.spec.ts` | §6.6 三條護欄各自對抗性測試:錯 3 次作廢(對的碼也救不回)、TTL 過期、單次使用(finish 燒毀)、每小時 5 次;code 只存 hash、wrapped blob 交付後清除、未確認前拿不到秘密 |
+| `contacts.spec.ts` | §11:身分金鑰單次建立與收斂、私鑰只以密文存放、加好友全流程與護欄(30 分 TTL)、跨 user ecdh 收發(通知 payload 解密 + 收件匣)、非好友 403、解除好友即封鎖、跨 user 檔案下載授權、明文 24h 保留上限 |
+| `cli.spec.ts` | §12.3 CLI 核心對真 Worker 全流程:取公鑰→包裹→推送→只有身分私鑰能解;無身分時的明確錯誤;明文模式權限 |
+| `qr.spec.ts` | 配對 QR 以獨立解碼器(jsQR)往返驗證;fragment 不出瀏覽器 |
 | `tokens.spec.ts` | token 只顯示一次/只存 hash、撤銷立即生效、send-only(不能讀)、明文模式 opt-in/2000 bytes 上限/拒收檔案/速率限制、§12.3 ecdh-p256 協定通道、拒收 self-wrap |
 | `cleanup.spec.ts` | Cron 清理過期訊息(D1+R2)與配對、冪等 |
 
@@ -122,17 +126,40 @@ e2e/                    Playwright E2E(11)
 scripts/                setup / gen-vapid / gen-icons / e2e-server
 ```
 
+## CLI:腳本推送(§12.3)
+
+零依賴(Node 18+),重用 PWA 的加密模組,不需安裝任何套件:
+
+```bash
+export BENTODROP_URL=https://bentodrop.ai-apps.work
+export BENTODROP_TOKEN=bd_xxx        # 設定 → API Tokens 建立
+
+node cli/bentodrop-push.mjs "建置完成"          # 加密模式(預設):token 只拿公鑰
+echo "備份完成" | node cli/bentodrop-push.mjs   # 也吃 stdin
+node cli/bentodrop-push.mjs --plain "磁碟 85%"  # 明文模式(token 需開啟)
+```
+
+加密模式流程:`GET /api/push/pubkey` 取身分公鑰 → 臨時 ECDH 包裹隨機 CEK → `ecdh-p256` envelope → `POST /api/push`。token 外洩的後果只有「能發垃圾訊息」,讀不到任何內容,包括它自己發的。
+
 ## 里程碑對應(§13)
 
 - **M1 骨架** ✅ Worker + D1 + VAPID,註冊與推送鏈路
 - **M2 加密** ✅ K_master/HKDF、envelope、短文字 E2E、備份(顯示+複製+抽 3 詞)
 - **M3 多裝置** ✅ URL+配對碼、三護欄、舊裝置確認、fan-out、410 清理、測試推送
 - **M4 檔案** ✅ 簽名直傳、20MB 上限、client 壓縮(canvas,EXIF 剝除+方向烘焙、HEIC 原檔 fallback)、meta 加密、清理
-- **M5 打磨** ◐ 通知隱私開關、下載/列印備份、失效偵測 UI、配對 QR code(掃描用手機原生相機,配對碼經 URL fragment 帶入、不經伺服器)、裝置別名(加入時自訂 + 設定頁隨時改名)已做;辨認式還原網格未做
-- **M6 API** ✅ token 管理、明文模式端點;§12.3 公鑰協定已通(無 CLI,按規格)
+- **M5 打磨** ✅ 通知隱私開關、通知「複製/開啟」action(§7.2:app 聚焦後嘗試寫剪貼簿,失敗退回詳情頁按鈕;「開啟」僅限 https)、備份取出:複製/QR/下載/列印、還原碼 QR 照片匯入(原生 BarcodeDetector,fallback jsQR)、配對與邀請 QR、裝置與好友別名、貼上就送(預設直送,可勾掉)、失效偵測 UI
+- **M6 API** ✅ token 管理、明文模式端點(24h 保留上限)、**CLI 公鑰加密模式**(`cli/bentodrop-push.mjs`)
+- **Phase 2(§11)** ✅ user 層級身分金鑰、加好友(§6.7 機制)、跨 user 加密收發(文字+檔案)、解除好友即封鎖、改名
+
+## Backlog(刻意延後)
+
+- 原檔模式的中間選項「原檔但移除 GPS」(§4.4,piexifjs 剝 GPS IFD)
+- 辨認式還原網格(§6.2 選配;現有輸入 + 4 字母前綴自動完成)
+- in-app 相機即時掃描(現為原生相機掃 QR + 照片匯入)
+- iOS 實機驗證(§9 全部項目)
 
 ## 已知限制
 
 - iOS 為 experimental(§9):需手動加入主畫面,未在實機驗證。
-- 掃描配對 QR 使用手機原生相機(不內建 in-app 掃描器);iOS 上會開在 Safari 分頁。
 - 還原碼在「所有裝置皆遺失」時只能救回金鑰身分,舊訊息過保留期即消失(無帳號系統,§6.8)。
+- 通知上的「複製」在部分平台仍可能失敗(§7.2 本質限制)— 失敗時會自動開啟訊息詳情,那裡永遠有手動複製按鈕。

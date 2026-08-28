@@ -145,6 +145,45 @@ export async function pairNewDevice(owner: TestDevice, label = "MacBook"): Promi
   };
 }
 
+export interface UserIdentity {
+  publicJwk: any;
+  privateKey: CryptoKey;
+}
+
+/** Publish a user-level identity (§5.2) the way the app's bootstrap does. */
+export async function setupIdentity(dev: TestDevice): Promise<UserIdentity> {
+  const pair = await C.generateIdentityPair();
+  const wrapped = await C.encryptJson(dev.kMaster, pair.privateJwk);
+  const res = await apiFetch("/api/identity", {
+    token: dev.token,
+    body: { identity_pub: pair.publicJwk, identity_priv_wrapped: wrapped },
+  });
+  if (res.status !== 200) throw new Error(`setIdentity failed ${res.status}`);
+  const stored = await json(res);
+  // On a race another device may have won — always use the stored pair.
+  const privJwk = await C.decryptJson(dev.kMaster, stored.identityPrivWrapped);
+  return {
+    publicJwk: stored.identityPub,
+    privateKey: await C.importIdentityPrivate(privJwk),
+  };
+}
+
+/** Run the full §6.7 add-friend flow between two users via the real API. */
+export async function makeFriends(
+  a: TestDevice, b: TestDevice, aName = "阿明", bName = "小美",
+): Promise<{ aIdentity: UserIdentity; bIdentity: UserIdentity }> {
+  const aIdentity = await setupIdentity(a);
+  const bIdentity = await setupIdentity(b);
+  const inv = await json(await apiFetch("/api/contacts/invite", { token: a.token, body: { myName: aName } }));
+  const claim = await apiFetch("/api/contacts/claim", {
+    token: b.token, body: { pairId: inv.pairId, code: inv.code, myName: bName },
+  });
+  if (claim.status !== 200) throw new Error(`contact claim failed ${claim.status}`);
+  const approve = await apiFetch(`/api/contacts/invite/${inv.pairId}/approve`, { token: a.token, body: {} });
+  if (approve.status !== 200) throw new Error(`contact approve failed ${approve.status}`);
+  return { aIdentity, bIdentity };
+}
+
 export interface CapturedPush {
   url: string;
   ttl: string | null;

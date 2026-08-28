@@ -121,9 +121,46 @@ async function makeWrap(kMaster, cekRaw) {
   return { mode: "self", iv, cek: ct };
 }
 
-async function openWrap(kMaster, wrap) {
-  if (wrap.mode !== "self") throw new Error(`unsupported wrap.mode: ${wrap.mode}`);
-  const raw = await aesDecrypt(kMaster, wrap.iv, wrap.cek);
+/** ECDH(secret, pub) → HKDF → AES-256-GCM key. Shared by pairing and envelope wrap. */
+async function ecdhDeriveKey(privateKey, peerJwk, salt) {
+  const peer = await subtle.importKey("jwk", peerJwk, { name: "ECDH", namedCurve: "P-256" }, false, []);
+  const bits = await subtle.deriveBits({ name: "ECDH", public: peer }, privateKey, 256);
+  const shared = await subtle.importKey("raw", bits, "HKDF", false, ["deriveKey"]);
+  return subtle.deriveKey(
+    { name: "HKDF", hash: "SHA-256", salt: te.encode(salt), info: te.encode("wrap") },
+    shared,
+    { name: "AES-GCM", length: 256 },
+    false,
+    ["encrypt", "decrypt"],
+  );
+}
+
+/** §11 / §12.3: wrap a CEK for a recipient's identity public key. */
+export async function wrapCekForPeer(peerPubJwk, cekRaw) {
+  const eph = await subtle.generateKey({ name: "ECDH", namedCurve: "P-256" }, true, ["deriveBits"]);
+  const wrapKey = await ecdhDeriveKey(eph.privateKey, peerPubJwk, "bentodrop-ecdh-v1");
+  const { iv, ct } = await aesEncrypt(wrapKey, cekRaw);
+  return { mode: "ecdh-p256", epk: await subtle.exportKey("jwk", eph.publicKey), iv, cek: ct };
+}
+
+/**
+ * `keys` is either a bare K_master CryptoKey (legacy) or a keyring
+ * { kMaster?, identityPriv? }. self-wraps need kMaster; ecdh-p256 wraps
+ * need the identity private key (§5.2).
+ */
+async function openWrap(keys, wrap) {
+  const ring = keys instanceof CryptoKey ? { kMaster: keys } : (keys ?? {});
+  let raw;
+  if (wrap.mode === "self") {
+    if (!ring.kMaster) throw new Error("missing K_master");
+    raw = await aesDecrypt(ring.kMaster, wrap.iv, wrap.cek);
+  } else if (wrap.mode === "ecdh-p256") {
+    if (!ring.identityPriv) throw new Error("missing identity key");
+    const wrapKey = await ecdhDeriveKey(ring.identityPriv, wrap.epk, "bentodrop-ecdh-v1");
+    raw = await aesDecrypt(wrapKey, wrap.iv, wrap.cek);
+  } else {
+    throw new Error(`unsupported wrap.mode: ${wrap.mode}`);
+  }
   return subtle.importKey("raw", raw, "AES-GCM", false, ["encrypt", "decrypt"]);
 }
 
@@ -143,6 +180,50 @@ export async function encryptTextEnvelope(kMaster, text, now = Date.now()) {
     obj: null,
     size: 0,
     ts: now,
+  };
+}
+
+/** Encrypt a text message for a CONTACT's identity public key (§11). */
+export async function encryptTextEnvelopeFor(peerPubJwk, text, now = Date.now()) {
+  const cekRaw = crypto.getRandomValues(new Uint8Array(32));
+  const cek = await subtle.importKey("raw", cekRaw, "AES-GCM", false, ["encrypt"]);
+  const body = await aesEncrypt(cek, te.encode(text));
+  return {
+    v: 1,
+    id: ulid(now),
+    kind: "text",
+    wrap: await wrapCekForPeer(peerPubJwk, cekRaw),
+    meta: null,
+    iv: body.iv,
+    ct: body.ct,
+    obj: null,
+    size: 0,
+    ts: now,
+  };
+}
+
+/** Encrypt a file for a CONTACT (§11). Uploads still go to the SENDER's prefix. */
+export async function encryptFileEnvelopeFor(peerPubJwk, senderUserId, bytes, name, mime, now = Date.now()) {
+  const cekRaw = crypto.getRandomValues(new Uint8Array(32));
+  const cek = await subtle.importKey("raw", cekRaw, "AES-GCM", false, ["encrypt"]);
+  const id = ulid(now);
+  const body = await aesEncrypt(cek, bytes);
+  const meta = await aesEncrypt(cek, te.encode(JSON.stringify({ name, mime })));
+  const ciphertext = unb64u(body.ct);
+  return {
+    envelope: {
+      v: 1,
+      id,
+      kind: "file",
+      wrap: await wrapCekForPeer(peerPubJwk, cekRaw),
+      meta: { iv: meta.iv, ct: meta.ct },
+      iv: body.iv,
+      ct: null,
+      obj: `u/${senderUserId}/inbox/${id}`,
+      size: ciphertext.byteLength,
+      ts: now,
+    },
+    ciphertext,
   };
 }
 
@@ -209,17 +290,22 @@ export async function generateEcdhPair() {
   return { privateKey: pair.privateKey, publicJwk: await subtle.exportKey("jwk", pair.publicKey) };
 }
 
-async function pairSharedKey(privateKey, peerJwk) {
-  const peer = await subtle.importKey("jwk", peerJwk, { name: "ECDH", namedCurve: "P-256" }, false, []);
-  const bits = await subtle.deriveBits({ name: "ECDH", public: peer }, privateKey, 256);
-  const shared = await subtle.importKey("raw", bits, "HKDF", false, ["deriveKey"]);
-  return subtle.deriveKey(
-    { name: "HKDF", hash: "SHA-256", salt: te.encode("bentodrop-pair-v1"), info: te.encode("wrap") },
-    shared,
-    { name: "AES-GCM", length: 256 },
-    false,
-    ["encrypt", "decrypt"],
-  );
+/** User-level identity keypair (§5.2) — private JWK is exported so it can be
+ *  wrapped with K_master and synced through the server to sibling devices. */
+export async function generateIdentityPair() {
+  const pair = await subtle.generateKey({ name: "ECDH", namedCurve: "P-256" }, true, ["deriveKey", "deriveBits"]);
+  return {
+    publicJwk: await subtle.exportKey("jwk", pair.publicKey),
+    privateJwk: await subtle.exportKey("jwk", pair.privateKey),
+  };
+}
+
+export async function importIdentityPrivate(jwk) {
+  return subtle.importKey("jwk", jwk, { name: "ECDH", namedCurve: "P-256" }, false, ["deriveBits", "deriveKey"]);
+}
+
+function pairSharedKey(privateKey, peerJwk) {
+  return ecdhDeriveKey(privateKey, peerJwk, "bentodrop-pair-v1");
 }
 
 /** Old device: wrap the secret payload (entropy + userName) for the new device. */

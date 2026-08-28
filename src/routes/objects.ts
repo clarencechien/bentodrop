@@ -33,7 +33,14 @@ export async function createUploadUrl(req: Request, env: Env, device: DeviceCtx)
 /** GET /api/download-url?key=... (device auth) */
 export async function createDownloadUrl(req: Request, env: Env, device: DeviceCtx): Promise<Response> {
   const key = new URL(req.url).searchParams.get("key") ?? "";
-  if (!key.startsWith(`u/${device.userId}/inbox/`)) return apiError(403, "forbidden_key");
+  if (!key.startsWith(`u/${device.userId}/inbox/`)) {
+    // §11: a file from a contact lives under the SENDER's prefix — allow it
+    // only when it backs a message actually addressed to me.
+    const mine = await env.DB.prepare(
+      "SELECT 1 FROM messages WHERE user_id = ? AND r2_key = ?",
+    ).bind(device.userId, key).first();
+    if (!mine) return apiError(403, "forbidden_key");
+  }
   const exp = Math.floor(Date.now() / 1000) + DOWNLOAD_URL_TTL_S;
   const sig = await hmacSign(env.URL_SIGNING_SECRET, `GET|${key}|${exp}`);
   return json({ url: `/api/object/${key}?exp=${exp}&sig=${sig}`, expiresAt: exp * 1000 });

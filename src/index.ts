@@ -7,7 +7,11 @@ import { handleRegister } from "./routes/register";
 import { pairApprove, pairClaim, pairCreate, pairFinish, pairStatus } from "./routes/pairing";
 import { clearMessages, deleteMessage, handleSend, listMessages, markRead } from "./routes/messages";
 import { createDownloadUrl, createUploadUrl, handleObject } from "./routes/objects";
-import { createToken, handleApiPush, listTokens, revokeToken, updateSettings } from "./routes/tokens";
+import { createToken, handleApiPush, listTokens, pushPubkey, revokeToken, updateSettings } from "./routes/tokens";
+import {
+  contactApprove, contactClaim, contactInvite, contactInviteStatus,
+  deleteContact, getIdentity, listContacts, renameContact, setIdentity,
+} from "./routes/contacts";
 import { deleteDevice, handleMe, handleSubscribe, handleTestPush, renameDevice } from "./routes/devices";
 import { cleanupExpired } from "./cron";
 
@@ -60,6 +64,11 @@ async function handleApi(req: Request, env: Env, path: string): Promise<Response
     if (!token) return apiError(401, "unauthorized");
     return handleApiPush(req, env, token);
   }
+  if (path === "/api/push/pubkey" && method === "GET") {
+    const token = await authApiToken(req, env);
+    if (!token) return apiError(401, "unauthorized");
+    return pushPubkey(env, token);
+  }
 
   // ── Device-authenticated endpoints ──────────────────────────────────
   const device = await authDevice(req, env);
@@ -77,6 +86,11 @@ async function handleApi(req: Request, env: Env, path: string): Promise<Response
   if (path === "/api/tokens" && method === "GET") return listTokens(env, device);
   if (path === "/api/settings" && method === "POST") return updateSettings(req, env, device);
   if (path === "/api/test-push" && method === "POST") return handleTestPush(req, env, device);
+  if (path === "/api/identity" && method === "POST") return setIdentity(req, env, device);
+  if (path === "/api/identity" && method === "GET") return getIdentity(env, device);
+  if (path === "/api/contacts" && method === "GET") return listContacts(env, device);
+  if (path === "/api/contacts/invite" && method === "POST") return contactInvite(req, env, device);
+  if (path === "/api/contacts/claim" && method === "POST") return contactClaim(req, env, device);
 
   let m: RegExpExecArray | null;
   if ((m = /^\/api\/messages\/([A-Za-z0-9_-]+)\/read$/.exec(path)) && method === "POST") {
@@ -99,6 +113,18 @@ async function handleApi(req: Request, env: Env, path: string): Promise<Response
   }
   if ((m = /^\/api\/devices\/([A-Za-z0-9_-]+)\/label$/.exec(path)) && method === "POST") {
     return renameDevice(req, env, device, m[1]);
+  }
+  if ((m = /^\/api\/contacts\/invite\/([A-Za-z0-9_-]+)\/status$/.exec(path)) && method === "GET") {
+    return contactInviteStatus(env, device, m[1]);
+  }
+  if ((m = /^\/api\/contacts\/invite\/([A-Za-z0-9_-]+)\/approve$/.exec(path)) && method === "POST") {
+    return contactApprove(req, env, device, m[1]);
+  }
+  if ((m = /^\/api\/contacts\/([A-Za-z0-9_-]+)\/label$/.exec(path)) && method === "POST") {
+    return renameContact(req, env, device, m[1]);
+  }
+  if ((m = /^\/api\/contacts\/([A-Za-z0-9_-]+)$/.exec(path)) && method === "DELETE") {
+    return deleteContact(env, device, m[1]);
   }
 
   return apiError(404, "not_found");

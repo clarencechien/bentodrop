@@ -3,7 +3,7 @@
 // ≤2000 bytes, never touches R2, and must be explicitly enabled per token.
 
 import type { DeviceCtx, Env } from "../types";
-import { PUSH_ENVELOPE_MAX, PUSH_TTL_TEXT_S, TEXT_PLAINTEXT_MAX, RETENTION_ALLOWED } from "../types";
+import { PLAINTEXT_RETENTION_CAP_MS, PUSH_ENVELOPE_MAX, PUSH_TTL_TEXT_S, TEXT_PLAINTEXT_MAX, RETENTION_ALLOWED } from "../types";
 import { apiError, enc, json, randomToken, readJson, sha256hex, ulid } from "../lib/util";
 import type { ApiTokenCtx } from "../auth";
 import { fanoutPush } from "../fanout";
@@ -86,7 +86,10 @@ export async function handleApiPush(req: Request, env: Env, token: ApiTokenCtx):
 
   const retention = await env.DB.prepare("SELECT retention_days FROM users WHERE user_id = ?")
     .bind(token.userId).first<{ retention_days: number }>();
-  const expiresAt = now + (retention?.retention_days ?? 7) * 24 * 3600 * 1000;
+  let retentionMs = (retention?.retention_days ?? 7) * 24 * 3600 * 1000;
+  // §14: plaintext messages sit unencrypted in D1, so they live at most 24h.
+  if (envelope.plain) retentionMs = Math.min(retentionMs, PLAINTEXT_RETENTION_CAP_MS);
+  const expiresAt = now + retentionMs;
 
   await env.DB.batch([
     env.DB.prepare(
@@ -101,6 +104,20 @@ export async function handleApiPush(req: Request, env: Env, token: ApiTokenCtx):
     PUSH_TTL_TEXT_S,
   );
   return json({ msgId: envelope.id, receipts });
+}
+
+/**
+ * GET /api/push/pubkey (API-token auth) — the user's identity PUBLIC key,
+ * everything a script needs for §12.3 public-key mode. Send-only stays
+ * send-only: a public key reads nothing.
+ */
+export async function pushPubkey(env: Env, token: ApiTokenCtx): Promise<Response> {
+  const row = await env.DB.prepare("SELECT identity_pub FROM users WHERE user_id = ?")
+    .bind(token.userId).first<{ identity_pub: string | null }>();
+  if (!row?.identity_pub) {
+    return apiError(409, "identity_missing", "開啟一次 BentoDrop App 以建立身分金鑰,再重試");
+  }
+  return json({ identityPub: JSON.parse(row.identity_pub) });
 }
 
 /** POST /api/settings (device auth) — retention (§10.2). */

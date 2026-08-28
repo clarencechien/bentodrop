@@ -4,6 +4,7 @@ import { api, ApiError } from "./api.js";
 import { K, kvDelete, kvGet, kvSet } from "./store.js";
 import { compressImage, isHeic, isImage } from "./image.js";
 import { qrSvg } from "./qr.js";
+import { decodeQrFromFile } from "./qr-import.js";
 
 const $app = document.getElementById("app");
 const $nav = document.getElementById("topNav");
@@ -14,6 +15,8 @@ const state = {
   userId: null,
   deviceId: null,
   label: null,
+  identityPriv: null, // user-level identity key (§5.2), lazily bootstrapped
+  contacts: [],
   msgs: [],
   decrypted: new Map(), // msgId → { text | meta }
 };
@@ -147,7 +150,7 @@ function setNav(loggedIn) {
 }
 
 // ── onboarding (§6.5: one field, no forced backup) ───────────────────
-function renderOnboarding() {
+function renderOnboarding(next) {
   setNav(false);
   $app.replaceChildren(el(`
     <div class="compartment" style="max-width:440px;margin:30px auto">
@@ -172,7 +175,8 @@ function renderOnboarding() {
     btn.disabled = true;
     try {
       await onboardNewUser(name);
-      renderInbox();
+      if (next) next();
+      else renderInbox();
       ensurePush({ interactive: true });
     } catch (err) {
       toast(err.message, true);
@@ -186,21 +190,52 @@ function renderOnboarding() {
 async function onboardNewUser(userName, entropy = C.generateEntropy()) {
   // §6.5: keys, registration, push — all in the background, one visible field.
   const kMaster = await C.deriveKmaster(entropy, userName);
-  const identity = await C.generateEcdhPair();
+  const deviceKeys = await C.generateEcdhPair();
   const label = guessLabel();
-  const reg = await api.register(label, identity.publicJwk);
+  const reg = await api.register(label, deviceKeys.publicJwk);
   await saveIdentity({
     entropy, userName,
     userId: reg.userId, deviceId: reg.deviceId, deviceToken: reg.deviceToken,
     label, vapidPublicKey: reg.vapidPublicKey,
   });
-  // Identity private key at rest is wrapped by K_master (§5.2).
-  const priv = await crypto.subtle.exportKey("jwk", identity.privateKey).catch(() => null);
-  if (priv) await kvSet("identityPrivWrapped", await C.encryptJson(kMaster, priv));
   state.kMaster = kMaster;
   state.userId = reg.userId;
   state.deviceId = reg.deviceId;
   state.label = label;
+  ensureUserIdentity().catch(() => {}); // §5.2 — background, not blocking
+}
+
+/**
+ * User-level identity keypair (§5.2 / §11): public JWK lives on the server;
+ * the private JWK is wrapped with K_master and synced through the server so
+ * every device of the user shares ONE identity. First device to run this
+ * creates it; everyone else converges on the stored pair.
+ */
+async function ensureUserIdentity() {
+  if (state.identityPriv) return state.identityPriv;
+  let wrapped = await kvGet(K.IDENTITY_WRAPPED);
+  if (!wrapped) {
+    try {
+      wrapped = (await api.getIdentity()).identityPrivWrapped;
+    } catch {
+      // none yet — create and publish; on a race the server returns the winner
+      const pair = await C.generateIdentityPair();
+      const res = await api.setIdentity(pair.publicJwk, await C.encryptJson(state.kMaster, pair.privateJwk));
+      wrapped = res.identityPrivWrapped;
+    }
+    await kvSet(K.IDENTITY_WRAPPED, wrapped);
+  }
+  const jwk = await C.decryptJson(state.kMaster, wrapped);
+  state.identityPriv = await C.importIdentityPrivate(jwk);
+  return state.identityPriv;
+}
+
+/** Keyring for decrypting an envelope, loading the identity key on demand. */
+async function keysFor(envelope) {
+  if (envelope?.wrap?.mode === "ecdh-p256") {
+    return { kMaster: state.kMaster, identityPriv: await ensureUserIdentity() };
+  }
+  return state.kMaster;
 }
 
 // ── inbox ─────────────────────────────────────────────────────────────
@@ -208,10 +243,11 @@ async function decryptPreview(m) {
   if (state.decrypted.has(m.msgId)) return state.decrypted.get(m.msgId);
   let out;
   try {
+    const keys = await keysFor(m.envelope);
     if (m.kind === "text") {
-      out = { text: await C.decryptTextEnvelope(state.kMaster, m.envelope) };
+      out = { text: await C.decryptTextEnvelope(keys, m.envelope) };
     } else {
-      out = { meta: await C.decryptFileMeta(state.kMaster, m.envelope) };
+      out = { meta: await C.decryptFileMeta(keys, m.envelope) };
     }
   } catch {
     out = { error: true };
@@ -226,16 +262,28 @@ async function refreshMessages() {
   return messages;
 }
 
+async function refreshContacts() {
+  try {
+    state.contacts = (await api.contacts()).contacts;
+  } catch {
+    state.contacts = state.contacts ?? [];
+  }
+  return state.contacts;
+}
+
 function renderInbox() {
   setNav(true);
   const root = el(`
     <div>
       <div class="paste-dock">
-        <p class="big">貼上就送</p>
-        <p class="small muted">送到你的全部裝置,內容在這台裝置上加密後才出門。</p>
+        <div class="row">
+          <p class="big" style="flex:none">裝好,送出</p>
+          <select id="sendTarget" style="margin-left:auto"><option value="">我的全部裝置</option></select>
+        </div>
         <textarea id="composeText" placeholder="輸入或貼上文字、連結…" maxlength="100000"></textarea>
         <div class="file-row">
-          <button class="btn inline" id="sendBtn" type="button">送到我的全部裝置</button>
+          <button class="btn inline" id="sendBtn" type="button">送出</button>
+          <button class="btn inline" id="pasteSendBtn" type="button" hidden>貼上就送</button>
           <label class="btn ghost inline" style="margin:0">
             選圖片 / 檔案<input id="fileInput" type="file" hidden>
           </label>
@@ -243,6 +291,9 @@ function renderInbox() {
             <input type="checkbox" id="origMode">原檔(保留 EXIF/GPS)
           </label>
         </div>
+        <label class="small muted" id="pasteDirectRow" style="display:flex;align-items:center;gap:5px;margin-top:6px" hidden>
+          <input type="checkbox" id="pasteDirect">貼上後直接送出(取消勾選則先填入輸入框)
+        </label>
         <div id="sendStatus"></div>
       </div>
       <div class="inbox-head"><b>收件匣</b><span class="cnt" id="unreadCnt" hidden></span>
@@ -251,6 +302,60 @@ function renderInbox() {
       <div id="msgList"></div>
     </div>`);
   $app.replaceChildren(root);
+
+  // Recipient picker: my own devices (default) or a contact (§11).
+  const $target = root.querySelector("#sendTarget");
+  refreshContacts().then(() => {
+    for (const c of state.contacts) {
+      $target.append(el(`<option value="${esc(c.peerUserId)}">給 ${esc(c.label)}</option>`));
+    }
+  });
+  const currentTarget = () => state.contacts.find((c) => c.peerUserId === $target.value) ?? null;
+
+  async function sendTextNow(text) {
+    const $status = root.querySelector("#sendStatus");
+    $status.replaceChildren(el(`<ul class="receipts"><li><b>…</b> 送出中</li></ul>`));
+    try {
+      const target = currentTarget();
+      const envelope = target
+        ? await C.encryptTextEnvelopeFor(target.peerPubkey, text)
+        : await C.encryptTextEnvelope(state.kMaster, text);
+      const res = await api.send(envelope, target?.peerUserId);
+      showReceipts($status, res.receipts, target?.label);
+      await refreshMessages().catch(() => {});
+      paint();
+      return true;
+    } catch (err) {
+      $status.replaceChildren(el(`<div class="banner err">送出失敗:${esc(err.message)}</div>`));
+      return false;
+    }
+  }
+
+  // Paste-to-send: default is "read clipboard and send immediately";
+  // unchecking the switch fills the composer instead.
+  const $pasteBtn = root.querySelector("#pasteSendBtn");
+  const $pasteDirect = root.querySelector("#pasteDirect");
+  if (navigator.clipboard?.readText) {
+    $pasteBtn.hidden = false;
+    root.querySelector("#pasteDirectRow").hidden = false;
+    kvGet(K.PASTE_DIRECT).then((v) => { $pasteDirect.checked = v !== false; });
+    $pasteDirect.onchange = () => kvSet(K.PASTE_DIRECT, $pasteDirect.checked);
+    $pasteBtn.onclick = async () => {
+      let text;
+      try {
+        text = (await navigator.clipboard.readText()).trim();
+      } catch {
+        return toast("無法讀取剪貼簿(權限被拒),請手動貼上", true);
+      }
+      if (!text) return toast("剪貼簿是空的", true);
+      if ($pasteDirect.checked) {
+        await sendTextNow(text);
+      } else {
+        root.querySelector("#composeText").value = text;
+        toast("已貼入,按送出");
+      }
+    };
+  }
 
   const $list = root.querySelector("#msgList");
   const $cnt = root.querySelector("#unreadCnt");
@@ -279,6 +384,7 @@ function renderInbox() {
         <button class="mini ${cls}" type="button">
           <div class="mh">
             <span>${esc((m.from ?? "未知裝置").toUpperCase())}</span><span>· ${fmtTime(m.createdAt)}</span>
+            ${m.fromContact ? '<span class="tagf">好友</span>' : ""}
             ${m.envelope.plain ? '<span class="tagx">未加密</span>' : ""}
             ${m.readAt ? "" : '<span class="unread"></span>'}
           </div>
@@ -305,18 +411,7 @@ function renderInbox() {
     const $t = root.querySelector("#composeText");
     const text = $t.value.trim();
     if (!text) return toast("先輸入一點內容", true);
-    const $status = root.querySelector("#sendStatus");
-    $status.replaceChildren(el(`<ul class="receipts"><li><b>…</b> 送出中</li></ul>`));
-    try {
-      const envelope = await C.encryptTextEnvelope(state.kMaster, text);
-      const res = await api.send(envelope);
-      $t.value = "";
-      showReceipts($status, res.receipts);
-      await refreshMessages().catch(() => {});
-      paint();
-    } catch (err) {
-      $status.replaceChildren(el(`<div class="banner err">送出失敗:${esc(err.message)}</div>`));
-    }
+    if (await sendTextNow(text)) $t.value = "";
   };
 
   // send file (§3.2 + §4.4)
@@ -336,13 +431,14 @@ function renderInbox() {
       if (!prepared.compressed && isImage(file) && !original) {
         toast(isHeic(file) ? "這張圖無法在瀏覽器中壓縮,將以原檔傳送(含 EXIF)" : "無法壓縮,以原檔傳送(含 EXIF)", true);
       }
-      const { envelope, ciphertext } = await C.encryptFileEnvelope(
-        state.kMaster, state.userId, prepared.bytes, prepared.name, prepared.mime,
-      );
+      const target = currentTarget();
+      const { envelope, ciphertext } = target
+        ? await C.encryptFileEnvelopeFor(target.peerPubkey, state.userId, prepared.bytes, prepared.name, prepared.mime)
+        : await C.encryptFileEnvelope(state.kMaster, state.userId, prepared.bytes, prepared.name, prepared.mime);
       const up = await api.uploadUrl(envelope.id, ciphertext.byteLength);
       await api.putObject(up.url, ciphertext);
-      const res = await api.send(envelope);
-      showReceipts($status, res.receipts);
+      const res = await api.send(envelope, target?.peerUserId);
+      showReceipts($status, res.receipts, target?.label);
       await refreshMessages().catch(() => {});
       paint();
     } catch (err) {
@@ -357,15 +453,16 @@ function renderInbox() {
   // §6.5: gentle backup nudge after the first file / on multi-device (checked in pairing flow)
 }
 
-function showReceipts($status, receipts) {
+function showReceipts($status, receipts, contactLabel) {
   if (!receipts?.length) {
-    $status.replaceChildren(el(`<p class="btn-note">已送達(目前沒有其他裝置訂閱推送)</p>`));
+    $status.replaceChildren(el(`<p class="btn-note">${contactLabel ? `已送給 ${esc(contactLabel)}(對方目前沒有裝置訂閱推送)` : "已送達(目前沒有其他裝置訂閱推送)"}</p>`));
     return;
   }
   const ul = el(`<ul class="receipts"></ul>`);
-  for (const r of receipts) {
-    ul.append(el(`<li class="${r.ok ? "" : "fail"}"><b>${r.ok ? "✓" : "✕"}</b> ${esc(r.label ?? r.deviceId.slice(0, 6))}${r.ok ? "" : ` · 失敗(${r.status})`}</li>`));
-  }
+  receipts.forEach((r, i) => {
+    const name = contactLabel ? `${esc(contactLabel)} 的裝置 ${i + 1}` : esc(r.label ?? r.deviceId.slice(0, 6));
+    ul.append(el(`<li class="${r.ok ? "" : "fail"}"><b>${r.ok ? "✓" : "✕"}</b> ${name}${r.ok ? "" : ` · 失敗(${r.status})`}</li>`));
+  });
   $status.replaceChildren(ul);
 }
 
@@ -415,7 +512,7 @@ async function openDetail(m) {
         try {
           const { url } = await api.downloadUrl(m.envelope.obj);
           const cipher = await api.getObject(url);
-          const plain = await C.decryptFileBody(state.kMaster, m.envelope, cipher);
+          const plain = await C.decryptFileBody(await keysFor(m.envelope), m.envelope, cipher);
           const blob = new Blob([plain], { type: d.meta.mime });
           const objUrl = URL.createObjectURL(blob);
           if (/^image\//.test(d.meta.mime)) {
@@ -647,6 +744,132 @@ function renderPairJoin(pairIdFromUrl) {
   };
 }
 
+// ── friends (§11 / §6.7): same URL+code mechanism, 30-minute TTL ─────
+async function renderFriendInvite() {
+  setNav(true);
+  const userName = (await kvGet(K.USER_NAME)) ?? "";
+  const root = el(`
+    <div class="compartment" style="max-width:460px;margin:30px auto">
+      <p class="eyebrow">加好友</p>
+      <h2 style="margin-top:8px">邀請對方掃描或開啟連結</h2>
+      <form id="fiForm">
+        <div class="field"><label>我顯示給對方的名字</label><input id="fiName" maxlength="64" value="${esc(userName)}" required></div>
+        <button class="btn" type="submit">建立邀請</button>
+      </form>
+      <div id="fiBody"></div>
+      <button class="btn ghost" id="fiBack" type="button">回設定</button>
+    </div>`);
+  $app.replaceChildren(root);
+  root.querySelector("#fiBack").onclick = () => renderSettings();
+
+  root.querySelector("#fiForm").onsubmit = async (e) => {
+    e.preventDefault();
+    const myName = root.querySelector("#fiName").value.trim();
+    const $body = root.querySelector("#fiBody");
+    try {
+      await ensureUserIdentity();
+      const inv = await api.contactInvite(myName);
+      root.querySelector("#fiForm").hidden = true;
+      const joinUrl = `${location.origin}/f/${inv.pairId}`;
+      $body.replaceChildren(el(`
+        <div>
+          <div class="qr">${qrSvg(`${joinUrl}#c=${inv.code}`, { label: "加好友 QR 碼" })}</div>
+          <p class="pairurl">${esc(joinUrl)}</p>
+          <p class="paircode">${esc(inv.code.split("").join(" "))}</p>
+          <p class="pairmeta">30 分鐘後失效 · 錯 3 次作廢 · 只能用一次</p>
+          <button class="btn ghost" id="fiCopy" type="button">複製網址與邀請碼</button>
+          <div id="fiWait"><p class="btn-note">等待對方加入…</p></div>
+        </div>`));
+      $body.querySelector("#fiCopy").onclick = () => copyText(`${joinUrl}  邀請碼 ${inv.code}`);
+
+      const $wait = $body.querySelector("#fiWait");
+      const poll = setInterval(async () => {
+        try {
+          const st = await api.contactInviteStatus(inv.pairId);
+          if (Date.now() > st.expiresAt) {
+            clearInterval(poll);
+            $wait.replaceChildren(el(`<div class="banner err">邀請已過期,請重新建立。</div>`));
+            return;
+          }
+          if (st.claimed && !st.completed) {
+            clearInterval(poll);
+            const box = el(`
+              <div>
+                <div class="banner">「<b>${esc(st.claimerName ?? "?")}</b>」要求成為好友。確認嗎?</div>
+                <div class="field"><label>你想怎麼稱呼對方</label><input id="fiLabel" maxlength="64" value="${esc(st.claimerName ?? "")}"></div>
+                <div class="row" style="margin-top:12px">
+                  <button class="btn inline" id="fiOk" type="button">確認加好友</button>
+                  <button class="btn ghost inline" id="fiNo" type="button">拒絕</button>
+                </div>
+              </div>`);
+            $wait.replaceChildren(box);
+            box.querySelector("#fiNo").onclick = () => renderSettings();
+            box.querySelector("#fiOk").onclick = async () => {
+              try {
+                const res = await api.contactApprove(inv.pairId, box.querySelector("#fiLabel").value.trim());
+                toast(`已加入好友:${res.contact.label}`);
+                await refreshContacts();
+                renderSettings();
+              } catch (err) {
+                toast(err.message, true);
+              }
+            };
+          }
+        } catch { /* keep polling */ }
+      }, 2000);
+    } catch (err) {
+      $body.replaceChildren(el(`<div class="banner err">${esc(err.message)}</div>`));
+    }
+  };
+}
+
+function renderFriendJoin(pairId) {
+  setNav(true);
+  const root = el(`
+    <div class="compartment" style="max-width:460px;margin:30px auto">
+      <p class="eyebrow">成為好友</p>
+      <h2 style="margin-top:8px">輸入邀請碼</h2>
+      <form id="fjForm">
+        <div class="field"><label>6 位邀請碼</label><input id="fjCode" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" autocomplete="one-time-code" required></div>
+        <div class="field"><label>我顯示給對方的名字</label><input id="fjName" maxlength="64" required></div>
+        <button class="btn" type="submit">加入</button>
+      </form>
+      <div id="fjStatus"></div>
+      <button class="btn ghost" id="fjBack" type="button">回收件匣</button>
+    </div>`);
+  $app.replaceChildren(root);
+  kvGet(K.USER_NAME).then((n) => { root.querySelector("#fjName").value = n ?? ""; });
+  const fragCode = /[#&]c=(\d{6})/.exec(location.hash)?.[1];
+  if (fragCode) root.querySelector("#fjCode").value = fragCode;
+  root.querySelector("#fjBack").onclick = () => { history.replaceState(null, "", "/"); renderInbox(); };
+
+  root.querySelector("#fjForm").onsubmit = async (e) => {
+    e.preventDefault();
+    const $status = root.querySelector("#fjStatus");
+    const btn = e.target.querySelector(".btn");
+    btn.disabled = true;
+    try {
+      await ensureUserIdentity();
+      const before = (await refreshContacts()).length;
+      const res = await api.contactClaim(pairId, root.querySelector("#fjCode").value.trim(), root.querySelector("#fjName").value.trim());
+      $status.replaceChildren(el(`<p class="btn-note">已送出,等待 ${esc(res.inviterName ?? "對方")} 確認…</p>`));
+      const poll = setInterval(async () => {
+        const contacts = await refreshContacts();
+        if (contacts.length > before) {
+          clearInterval(poll);
+          toast(`已成為好友:${contacts[contacts.length - 1].label}`);
+          history.replaceState(null, "", "/");
+          renderInbox();
+        }
+      }, 2000);
+      setTimeout(() => clearInterval(poll), 30 * 60 * 1000);
+    } catch (err) {
+      $status.replaceChildren(el(`<div class="banner err">${esc(err.message)}</div>`));
+      btn.disabled = false;
+    }
+  };
+}
+
 // ── backup (§6.5.1) ──────────────────────────────────────────────────
 async function renderBackup() {
   setNav(true);
@@ -658,13 +881,14 @@ async function renderBackup() {
       <h2 style="margin-top:8px">抄下這 12 個字</h2>
       <p class="small muted" style="margin-top:6px">兩台裝置都遺失時,只有這個能救回來。我們沒有備份,也救不了你。</p>
       <div class="words" id="wordGrid"></div>
-      <div class="save-opts">
+      <div class="save-opts" style="grid-template-columns:repeat(5,1fr)">
         <button class="save-opt pri" id="svCopy" type="button">複製</button>
+        <button class="save-opt" id="svQr" type="button">QR</button>
         <button class="save-opt" id="svDl" type="button">下載</button>
         <button class="save-opt" id="svPrint" type="button">列印</button>
         <button class="save-opt" id="svHand" type="button">已手抄</button>
       </div>
-      <p class="btn-note">複製:貼進密碼管理器,貼完清空剪貼簿 · 下載:檔案會留在下載資料夾 · 列印:印表機可能有快取</p>
+      <p class="btn-note">複製:貼進密碼管理器,貼完清空剪貼簿 · QR:相簿可能自動同步到雲端 · 下載:檔案會留在下載資料夾 · 列印:印表機可能有快取</p>
       <button class="btn" id="svVerify" type="button">存好了,抽 3 個字驗證</button>
       <button class="btn ghost" id="svBack" type="button">回收件匣</button>
     </div>`);
@@ -679,6 +903,16 @@ async function renderBackup() {
     a.download = "bentodrop-recovery.txt";
     a.click();
     toast("已下載,記得移出下載資料夾");
+  };
+  root.querySelector("#svQr").onclick = () => {
+    const box = el(`
+      <div>
+        <h3>還原碼 QR</h3>
+        <p class="small muted" style="margin-top:6px">用另一台裝置拍下或截圖保存。⚠ 存進相簿的話,相簿可能會自動同步到雲端。</p>
+        <div class="qr" style="width:220px;height:220px">${qrSvg(phrase, { label: "還原碼 QR" })}</div>
+        <p class="btn-note">還原時在「用還原碼還原」頁選這張圖即可</p>
+      </div>`);
+    modal(box);
   };
   root.querySelector("#svPrint").onclick = () => window.print();
   root.querySelector("#svHand").onclick = () => toast("記得放在安全的地方");
@@ -728,6 +962,7 @@ function renderRestore() {
       <div class="banner">還原碼能找回你的金鑰。沒有伺服器帳號,舊訊息(預設 7 天)過期即消失;還原後這台會成為新的第一台裝置。</div>
       <form id="rsForm">
         <div class="field"><label>名字(當初輸入的)</label><input id="rsName" required></div>
+        <label class="btn ghost" style="margin-top:12px">用 QR 照片匯入 12 個字<input id="rsQrFile" type="file" accept="image/*" hidden></label>
         <div class="words" id="rsGrid"></div>
         <button class="btn" type="submit">還原</button>
       </form>
@@ -745,6 +980,21 @@ function renderRestore() {
     if (e.target.tagName !== "INPUT") return;
     dl.replaceChildren(...C.wordCompletions(e.target.value).map((w) => el(`<option value="${w}"></option>`)));
   });
+  root.querySelector("#rsQrFile").onchange = async (e) => {
+    const file = e.target.files[0];
+    e.target.value = "";
+    if (!file) return;
+    try {
+      const text = await decodeQrFromFile(file);
+      const words = text.trim().toLowerCase().split(/\s+/);
+      if (words.length !== 12) throw new Error("這個 QR 不是 12 字還原碼");
+      const inputs = grid.querySelectorAll("input");
+      words.forEach((w, i) => { inputs[i].value = w; });
+      toast("已匯入 12 個字,確認後按還原");
+    } catch (err) {
+      toast(err.message, true);
+    }
+  };
   root.querySelector("#rsBack").onclick = () => renderOnboarding();
   root.querySelector("#rsForm").onsubmit = async (e) => {
     e.preventDefault();
@@ -788,6 +1038,13 @@ async function renderSettings() {
           <button class="btn ghost inline" id="stEnablePush" type="button">啟用本機通知</button>
         </div>
         <div id="pushResult"></div>
+      </div>
+
+      <div class="compartment">
+        <h3>好友</h3>
+        <p class="small muted">加了好友就能互送。對方看不到你的裝置名稱,只看到你取的名字。</p>
+        <div id="friendList"></div>
+        <button class="btn inline" id="stFriendInvite" type="button" style="margin-top:10px">邀請好友</button>
       </div>
 
       <div class="compartment">
@@ -876,6 +1133,40 @@ async function renderSettings() {
     $dev.append(row);
   }
 
+  // friends (§11)
+  const $friends = root.querySelector("#friendList");
+  refreshContacts().then(() => {
+    $friends.replaceChildren();
+    if (!state.contacts.length) {
+      $friends.append(el(`<p class="small muted">還沒有好友。</p>`));
+      return;
+    }
+    for (const c of state.contacts) {
+      const row = el(`
+        <div class="dev-row">
+          <span class="lab">${esc(c.label)}</span>
+          <span class="meta">${new Date(c.createdAt).toLocaleDateString()} 加入</span>
+          <span class="spacer"></span>
+        </div>`);
+      const rn = el(`<button class="btn ghost inline" type="button">改名</button>`);
+      rn.onclick = async () => {
+        const label = prompt("好友稱呼", c.label)?.trim();
+        if (!label || label === c.label) return;
+        await api.renameContact(c.peerUserId, label).catch((err) => toast(err.message, true));
+        renderSettings();
+      };
+      const rm = el(`<button class="btn ghost inline" type="button">解除</button>`);
+      rm.onclick = async () => {
+        if (!confirm(`解除好友「${c.label}」?對方將無法再傳東西給你。`)) return;
+        await api.deleteContact(c.peerUserId).catch((err) => toast(err.message, true));
+        renderSettings();
+      };
+      row.append(rn, rm);
+      $friends.append(row);
+    }
+  });
+  root.querySelector("#stFriendInvite").onclick = () => renderFriendInvite();
+
   root.querySelector("#stPair").onclick = () => renderPairOld();
   root.querySelector("#stTestPush").onclick = async () => {
     const $r = root.querySelector("#pushResult");
@@ -946,10 +1237,13 @@ async function renderSettings() {
     const plain = root.querySelector("#tokPlain").checked;
     try {
       const res = await api.createToken(label, plain, 60);
+      const usage = plain
+        ? `curl -X POST ${esc(location.origin)}/api/push -H "Authorization: Bearer ${esc(res.token)}" -H "content-type: application/json" -d '{"text":"建置完成"}'`
+        : `BENTODROP_URL=${esc(location.origin)} BENTODROP_TOKEN=${esc(res.token)} node cli/bentodrop-push.mjs "建置完成"(加密模式,見 repo 的 cli/)`;
       root.querySelector("#tokReveal").replaceChildren(el(`
         <div class="token-reveal">
           <b>只顯示這一次,現在就複製:</b><br>${esc(res.token)}<br>
-          <span class="small muted">curl -X POST ${esc(location.origin)}/api/push -H "Authorization: Bearer ${esc(res.token)}" -H "content-type: application/json" -d '{"text":"建置完成"}'</span>
+          <span class="small muted">${usage}</span>
         </div>`));
       root.querySelector("#tokLabel").value = "";
       paintTokens();
@@ -966,24 +1260,20 @@ async function boot() {
       console.warn("SW registration failed", err);
     });
     navigator.serviceWorker.addEventListener("message", async (e) => {
-      // notificationclick → open the message; attempt clipboard, always show UI (§7.2)
+      // notificationclick → open the message; the detail view carries the
+      // real copy button (§7.2 — auto-copy without user activation is a lie)
       if (e.data?.t === "open-msg") {
         await refreshMessages().catch(() => {});
         renderInbox();
         const m = state.msgs.find((x) => x.msgId === e.data.msgId);
-        if (m) {
-          openDetail(m);
-          if (e.data.copy && m.kind === "text") {
-            const d = await decryptPreview(m);
-            if (d.text !== undefined) copyText(d.text);
-          }
-        }
+        if (m) openDetail(m);
       }
     });
   }
 
   const loggedIn = await loadIdentity();
   const pairMatch = /^\/p\/([A-Za-z0-9_-]+)$/.exec(location.pathname);
+  const friendMatch = /^\/f\/([A-Za-z0-9_-]+)$/.exec(location.pathname);
 
   if (pairMatch) {
     // Joining is for NEW devices; an already-set-up device landing here is
@@ -996,12 +1286,20 @@ async function boot() {
     }
     return;
   }
+  if (friendMatch) {
+    // Both sides of a friend link are real users — someone without an
+    // account onboards first, then lands back in the claim flow (§6.7).
+    if (loggedIn) renderFriendJoin(friendMatch[1]);
+    else renderOnboarding(() => renderFriendJoin(friendMatch[1]));
+    return;
+  }
   if (!loggedIn) {
     renderOnboarding();
     return;
   }
   renderInbox();
   ensurePush(); // silent re-sync (§8.3 #3)
+  ensureUserIdentity().catch(() => {}); // §5.2 — keeps CLI pubkey + friend flow ready
   window.addEventListener("focus", async () => {
     await refreshMessages().catch(() => {});
   });

@@ -2,7 +2,7 @@
 // Web Push itself is exercised in the workerd integration suite — headless
 // browsers have no push service — everything else here is the real thing.
 import { expect, test } from "@playwright/test";
-import { newDeviceContext, onboard, refreshInbox, sendText } from "./helpers";
+import { newDeviceContext, onboard, qrPngBuffer, refreshInbox, sendText } from "./helpers";
 
 test("onboarding: one field, straight into the inbox", async ({ browser, baseURL }) => {
   const { context, page } = await newDeviceContext(browser, baseURL!);
@@ -140,6 +140,108 @@ test("pairing (§6.6): QR-less URL+code flow moves K_master to a second device",
   await expect(received).toContainText("工作筆電");
 
   await a.context.close();
+  await b.context.close();
+});
+
+test("friends (§11): invite → claim → approve → cross-user encrypted send", async ({ browser, baseURL }) => {
+  test.setTimeout(150_000);
+  const a = await newDeviceContext(browser, baseURL!);
+  await onboard(a.page, "ming");
+  const b = await newDeviceContext(browser, baseURL!);
+  await onboard(b.page, "mei");
+
+  // A invites.
+  await a.page.getByRole("button", { name: "設定" }).click();
+  await a.page.getByRole("button", { name: "邀請好友" }).click();
+  await a.page.getByRole("button", { name: "建立邀請" }).click();
+  await expect(a.page.locator(".paircode")).toBeVisible();
+  await expect(a.page.locator(".qr svg")).toBeVisible();
+  const joinUrl = (await a.page.locator(".pairurl").innerText()).trim();
+  const code = (await a.page.locator(".paircode").innerText()).replace(/\s/g, "");
+
+  // B opens the QR link — logged in, so it goes straight to the claim form.
+  await b.page.goto(`${joinUrl}#c=${code}`);
+  await expect(b.page.locator("#fjCode")).toHaveValue(code);
+  await b.page.locator("#fjName").fill("小美");
+  await b.page.getByRole("button", { name: "加入" }).click();
+
+  // A must explicitly approve, and can pick a label.
+  await expect(a.page.getByText("要求成為好友")).toBeVisible({ timeout: 20_000 });
+  await expect(a.page.locator("#fiLabel")).toHaveValue("小美");
+  await a.page.getByRole("button", { name: "確認加好友" }).click();
+  await expect(a.page.locator(".dev-row", { hasText: "小美" })).toBeVisible({ timeout: 10_000 });
+
+  // B lands back in the inbox once the friendship exists.
+  await expect(b.page.locator(".paste-dock")).toBeVisible({ timeout: 20_000 });
+
+  // B sends to the friend — encrypted against A's identity key.
+  const secret = `給朋友的悄悄話 ${Date.now()}`;
+  await b.page.locator("#sendTarget").selectOption({ label: "給 ming" });
+  await b.page.locator("#composeText").fill(secret);
+  await b.page.getByRole("button", { name: "送出" }).click();
+  await expect(b.page.locator("#sendStatus")).toContainText(/已送給|✓/);
+
+  // A receives it under the 好友 tag with the chosen label, decrypted.
+  await a.page.goto("/");
+  await refreshInbox(a.page);
+  const card = a.page.locator(".mini", { hasText: "給朋友的悄悄話" });
+  await expect(card).toBeVisible();
+  await expect(card.locator(".tagf")).toHaveText("好友");
+  await expect(card).toContainText("小美");
+  await card.click();
+  await expect(a.page.locator(".modal .detail-body")).toHaveText(secret);
+
+  await a.context.close();
+  await b.context.close();
+});
+
+test("paste-to-send: direct by default, fills the composer when unchecked", async ({ browser, baseURL }) => {
+  const { context, page } = await newDeviceContext(browser, baseURL!, ["clipboard-read", "clipboard-write"]);
+  await onboard(page, "paster");
+
+  await expect(page.locator("#pasteSendBtn")).toBeVisible();
+  await expect(page.locator("#pasteDirect")).toBeChecked(); // default on
+
+  await page.evaluate(() => navigator.clipboard.writeText("剪貼簿直送測試"));
+  await page.getByRole("button", { name: "貼上就送" }).click();
+  await expect(page.locator("#sendStatus")).toContainText(/已送達|✓/);
+  await refreshInbox(page);
+  await expect(page.locator(".mini", { hasText: "剪貼簿直送測試" })).toBeVisible();
+
+  // Unchecked → paste only fills the composer.
+  await page.locator("#pasteDirect").uncheck();
+  await page.evaluate(() => navigator.clipboard.writeText("先別送出這段"));
+  await page.getByRole("button", { name: "貼上就送" }).click();
+  await expect(page.locator("#composeText")).toHaveValue("先別送出這段");
+  await context.close();
+});
+
+test("recovery QR: export from backup, import a photo on restore (§6.5.1)", async ({ browser, baseURL }) => {
+  // Device 1: back up and read the words + open the QR view.
+  const a = await newDeviceContext(browser, baseURL!);
+  await onboard(a.page, "qruser");
+  await a.page.getByRole("button", { name: "設定" }).click();
+  await a.page.getByRole("button", { name: "備份還原碼" }).click();
+  const words = (await a.page.locator(".word").allInnerTexts()).map((w) => w.replace(/^\d+/, "").trim());
+  await a.page.getByRole("button", { name: "QR", exact: true }).click();
+  await expect(a.page.locator(".modal .qr svg")).toBeVisible();
+  await a.context.close();
+
+  // Device 2: restore by "photographing" that QR (same payload, rendered to PNG).
+  const b = await newDeviceContext(browser, baseURL!);
+  await b.page.goto("/");
+  await b.page.getByRole("button", { name: "用還原碼還原" }).click();
+  await b.page.locator("#rsName").fill("qruser");
+  await b.page.locator("#rsQrFile").setInputFiles({
+    name: "recovery-qr.png",
+    mimeType: "image/png",
+    buffer: qrPngBuffer(words.join(" ")),
+  });
+  const inputs = b.page.locator("#rsGrid input");
+  await expect(inputs.first()).toHaveValue(words[0]);
+  await expect(inputs.last()).toHaveValue(words[11]);
+  await b.page.getByRole("button", { name: "還原" }).click();
+  await expect(b.page.locator(".paste-dock")).toBeVisible();
   await b.context.close();
 });
 
