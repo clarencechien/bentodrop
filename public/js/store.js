@@ -67,5 +67,6 @@ export const K = {
   APP_INSTALLED: "appInstalled",         // this device has the PWA installed
   IDENTITY_WRAPPED: "identityWrapped", // user-level identity private key, K_master-wrapped (§5.2)
   MSG_CACHE: "msgCache",           // last inbox listing (ciphertext envelopes) for instant first paint
+  PENDING_INVITE: "pendingInvite", // friend invite opened before an account existed: {pairId, code, ts}
   VAPID: "vapidPublicKey",
 };

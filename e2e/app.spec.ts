@@ -195,6 +195,63 @@ test("friends (§11): invite → claim → approve → cross-user encrypted send
   await b.context.close();
 });
 
+test("friend invite before onboarding: pairing join keeps ONE account and resumes the invite", async ({ browser, baseURL }) => {
+  test.setTimeout(180_000);
+  // hana invites; yuki already has an account on her laptop, but opens the
+  // invite on a fresh browser (the two-onboardings trap). The right move —
+  // pairing the fresh browser into her existing account — must carry the
+  // invite through instead of losing it.
+  const a = await newDeviceContext(browser, baseURL!);
+  await onboard(a.page, "hana");
+  await a.page.getByRole("button", { name: "設定" }).click();
+  await a.page.getByRole("button", { name: "邀請好友" }).click();
+  await a.page.getByRole("button", { name: "建立邀請" }).click();
+  const inviteUrl = (await a.page.locator(".pairurl").innerText()).trim();
+  const inviteCode = (await a.page.locator(".paircode").innerText()).replace(/\s/g, "");
+
+  const laptop = await newDeviceContext(browser, baseURL!);
+  await onboard(laptop.page, "yuki");
+
+  // Fresh browser opens the invite → onboarding, with the one-account hint.
+  const phone = await newDeviceContext(browser, baseURL!);
+  await phone.page.goto(`${inviteUrl}#c=${inviteCode}`);
+  await expect(phone.page.getByText("重新開通會變成另一個帳號")).toBeVisible();
+
+  // She picks 配對加入 instead of onboarding again.
+  await laptop.page.getByRole("button", { name: "加裝置" }).click();
+  const pairUrl = (await laptop.page.locator(".pairurl").innerText()).trim();
+  const pairCode = (await laptop.page.locator(".paircode").innerText()).replace(/\s/g, "");
+  await phone.page.getByRole("button", { name: "已有其他裝置?配對加入" }).click();
+  // The friend-invite code from the fragment must NOT leak into the pairing form.
+  await expect(phone.page.locator("#jnCode")).toHaveValue("");
+  await phone.page.locator("#jnPairId").fill(pairUrl);
+  await phone.page.locator("#jnCode").fill(pairCode);
+  await phone.page.locator("#jnLabel").fill("手機");
+  await phone.page.getByRole("button", { name: "加入" }).click();
+  await expect(laptop.page.getByText("要求配對")).toBeVisible({ timeout: 20_000 });
+  await laptop.page.getByRole("button", { name: "確認配對" }).click();
+
+  // Pairing done → the stashed invite resumes, code prefilled, and the
+  // friendship lands on yuki's EXISTING account.
+  await expect(phone.page.getByText("成為好友")).toBeVisible({ timeout: 20_000 });
+  await expect(phone.page.locator("#fjCode")).toHaveValue(inviteCode);
+  await phone.page.locator("#fjName").fill("小雪");
+  await phone.page.getByRole("button", { name: "加入" }).click();
+  await expect(a.page.getByText("要求成為好友")).toBeVisible({ timeout: 20_000 });
+  await a.page.getByRole("button", { name: "確認加好友" }).click();
+  await expect(phone.page.locator(".paste-dock")).toBeVisible({ timeout: 20_000 });
+
+  // Proof of one account: the LAPTOP (which never touched the invite) sees
+  // hana in its friend list too.
+  await laptop.page.goto("/");
+  await laptop.page.getByRole("button", { name: "設定" }).click();
+  await expect(laptop.page.locator(".dev-row", { hasText: "hana" })).toBeVisible({ timeout: 10_000 });
+
+  await a.context.close();
+  await laptop.context.close();
+  await phone.context.close();
+});
+
 test("clipboard composer: grayed preview + 即送; typing flips to 送出; preview click edits", async ({ browser, baseURL }) => {
   const { context, page } = await newDeviceContext(browser, baseURL!, ["clipboard-read", "clipboard-write"]);
   await onboard(page, "paster");
