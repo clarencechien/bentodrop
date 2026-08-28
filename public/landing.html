@@ -1,0 +1,477 @@
+<!DOCTYPE html>
+<html lang="zh-Hant-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#E6EDEA">
+<title>BentoDrop 便當 — 跨裝置加密便當:裝好、送出、拆開</title>
+<meta name="description" content="在自己的裝置之間推送文字、連結、照片,端到端加密,伺服器打不開盒子。也能送給家人。">
+<link rel="icon" href="/icons/icon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;600;800;900&family=Noto+Sans+TC:wght@400;500;700;900&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
+<noscript><link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;600;800;900&family=Noto+Sans+TC:wght@400;500;700;900&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet"></noscript>
+<style>
+:root{
+  --box:#E6EDEA; --box-deep:#D3DEDA; --rice:#FCFBF7;
+  --nori:#172A26; --nori-soft:#4A605A;
+  --gogo:#00C2A8; --gogo-deep:#00A28C;
+  --ume:#E0483A; --tama:#F0B23C;
+  --r:14px;
+  --shadow:0 1px 0 rgba(23,42,38,.06), 0 8px 24px -12px rgba(23,42,38,.28);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{-webkit-text-size-adjust:100%;scroll-behavior:smooth}
+body{
+  background:var(--box);color:var(--nori);
+  font-family:"Noto Sans TC","Archivo",system-ui,sans-serif;
+  font-size:15px;line-height:1.65;-webkit-font-smoothing:antialiased;
+  background-image:
+    linear-gradient(var(--box-deep) 1px,transparent 1px),
+    linear-gradient(90deg,var(--box-deep) 1px,transparent 1px);
+  background-size:64px 64px;background-position:-1px -1px;
+}
+::selection{background:var(--gogo);color:#fff}
+.wrap{max-width:1180px;margin:0 auto;padding:0 24px}
+.eyebrow{font-family:"Space Mono",monospace;font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--nori-soft)}
+h1,h2,h3{font-family:"Archivo","Noto Sans TC",sans-serif;line-height:1.06;letter-spacing:-.02em}
+h1{font-weight:900;font-size:clamp(42px,8vw,86px)}
+h2{font-weight:800;font-size:clamp(26px,4vw,40px)}
+h3{font-weight:700;font-size:19px;letter-spacing:-.01em}
+.lede{font-size:clamp(16px,2vw,19px);color:var(--nori-soft);max-width:56ch;line-height:1.6}
+.mono{font-family:"Space Mono",monospace}
+.divider{height:0;border:0;border-top:2px solid var(--nori);opacity:.14;margin:0}
+
+/* header */
+header.top{position:sticky;top:0;z-index:60;background:rgba(230,237,234,.88);backdrop-filter:blur(12px);border-bottom:2px solid rgba(23,42,38,.12)}
+.top-in{display:flex;align-items:center;gap:14px;height:60px}
+.mark{display:flex;align-items:center;gap:9px;font-weight:900;font-family:"Archivo",sans-serif;font-size:16px;letter-spacing:-.02em;color:var(--nori);text-decoration:none}
+.mark i{width:20px;height:16px;border-radius:3px;border:2px solid var(--nori);background:linear-gradient(var(--gogo),var(--gogo)) left/38% 100% no-repeat,var(--rice);display:block;flex:none}
+.top-meta{margin-left:auto;display:flex;gap:18px;font-size:12px;align-items:center}
+.top-meta a{color:var(--nori-soft);text-decoration:none;border-bottom:1px solid transparent;padding-bottom:1px}
+.top-meta a:hover{color:var(--nori);border-bottom-color:var(--gogo)}
+.cta{display:inline-block;background:var(--gogo);color:#04302A;border:2px solid var(--nori);border-radius:10px;padding:10px 22px;font-weight:900;font-size:15px;font-family:"Archivo","Noto Sans TC",sans-serif;box-shadow:0 3px 0 var(--nori);text-decoration:none;white-space:nowrap}
+.cta:active{transform:translateY(2px);box-shadow:0 1px 0 var(--nori)}
+.cta.small{padding:7px 14px;font-size:13px}
+.cta.ghost{background:transparent;color:var(--nori);box-shadow:none;border-color:rgba(23,42,38,.3);font-weight:700}
+
+/* hero */
+.hero{padding:64px 0 40px;display:grid;grid-template-columns:1fr 380px;gap:56px;align-items:center}
+.hero h1 em{font-style:normal;color:var(--gogo);-webkit-text-stroke:2px var(--nori);paint-order:stroke fill}
+.hero-sub{margin-top:20px}
+.hero-cta{display:flex;gap:12px;margin-top:26px;flex-wrap:wrap}
+.hero-stats{display:flex;gap:0;margin-top:28px;border:2px solid rgba(23,42,38,.14);border-radius:var(--r);overflow:hidden;background:var(--rice)}
+.stat{flex:1;padding:14px 16px;border-right:2px solid rgba(23,42,38,.14)}
+.stat:last-child{border-right:0}
+.stat b{display:block;font-family:"Archivo",sans-serif;font-weight:900;font-size:23px;letter-spacing:-.02em}
+.stat span{font-size:11px;color:var(--nori-soft);letter-spacing:.04em}
+
+/* the openable bento */
+.bento-stage{display:flex;flex-direction:column;align-items:center;gap:16px}
+.bento{width:300px;height:212px;position:relative;cursor:pointer;background:none;border:0;padding:0;font:inherit;color:inherit;perspective:900px}
+.bento:focus-visible{outline:3px solid var(--gogo);outline-offset:8px;border-radius:6px}
+.box-body{position:absolute;inset:14px 0 0;background:var(--rice);border:2px solid var(--nori);border-radius:10px;box-shadow:var(--shadow);display:grid;grid-template-columns:1.55fr 1fr;grid-template-rows:1fr 1fr;gap:2px;padding:2px;overflow:hidden}
+.cell{background:#EFF3F1;border-radius:6px;display:flex;align-items:center;justify-content:center;opacity:0;transform:translateY(8px) scale(.96);transition:opacity .34s cubic-bezier(.2,.9,.3,1),transform .34s cubic-bezier(.2,.9,.3,1)}
+.cell-main{grid-row:1/3;padding:14px;flex-direction:column;align-items:flex-start;justify-content:center;gap:8px;background:#F4F7F5}
+.cell-main p{font-size:13.5px;line-height:1.5;font-weight:500}
+.cell-main .from{font-family:"Space Mono",monospace;font-size:10px;letter-spacing:.1em;color:var(--nori-soft)}
+.cell-act{font-family:"Space Mono",monospace;font-size:11px;letter-spacing:.06em;font-weight:700;color:var(--nori)}
+.cell-act.go{background:var(--gogo);color:#04302A}
+.is-open .cell{opacity:1;transform:none}
+.is-open .cell:nth-child(1){transition-delay:.14s}
+.is-open .cell:nth-child(2){transition-delay:.2s}
+.is-open .cell:nth-child(3){transition-delay:.26s}
+.box-lid{position:absolute;left:0;right:0;top:0;height:64px;background:linear-gradient(180deg,#FFFEFA,#F0F2EE);border:2px solid var(--nori);border-radius:10px;transform-origin:50% 100%;transition:transform .5s cubic-bezier(.34,1.3,.5,1),box-shadow .5s;box-shadow:var(--shadow);display:flex;align-items:center;padding:0 14px;gap:10px}
+.is-open .box-lid{transform:rotateX(-104deg) translateY(-6px);box-shadow:none}
+.sticker{background:var(--rice);border:1.5px dashed var(--nori-soft);border-radius:4px;padding:4px 8px;font-family:"Space Mono",monospace;font-size:10px;letter-spacing:.06em;transform:rotate(-1.2deg)}
+.lid-dot{width:8px;height:8px;border-radius:50%;background:var(--ume);margin-left:auto;flex:none}
+.band{position:absolute;left:calc(50% - 3px);top:6px;width:6px;height:100%;background:var(--ume);border-radius:3px;z-index:3;transition:transform .3s cubic-bezier(.5,-.6,.7,1),opacity .3s}
+.is-open .band{transform:translateY(-26px) scaleY(.2) rotate(9deg);opacity:0}
+.steam{position:absolute;left:0;right:0;top:-6px;height:60px;pointer-events:none;z-index:2}
+.steam i{position:absolute;bottom:0;width:5px;height:5px;border-radius:50%;background:var(--gogo);opacity:0}
+.is-open .steam i{animation:rise 1.5s ease-out forwards}
+.steam i:nth-child(1){left:34%;animation-delay:.18s}
+.steam i:nth-child(2){left:46%;animation-delay:.3s}
+.steam i:nth-child(3){left:58%;animation-delay:.24s}
+@keyframes rise{0%{opacity:0;transform:translateY(6px) scale(.6)}30%{opacity:.55}100%{opacity:0;transform:translateY(-42px) scale(1.5)}}
+.bento-hint{font-family:"Space Mono",monospace;font-size:11px;letter-spacing:.1em;color:var(--nori-soft)}
+
+/* sections */
+section{padding:72px 0}
+.sec-head{display:flex;align-items:baseline;gap:18px;margin-bottom:8px;flex-wrap:wrap}
+.sec-head .num{font-family:"Space Mono",monospace;font-weight:700;font-size:12px;background:var(--nori);color:var(--box);padding:3px 8px;border-radius:4px;letter-spacing:.08em}
+.sec-note{margin:14px 0 40px;max-width:60ch;color:var(--nori-soft)}
+
+/* feature grid */
+.feats{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:2px;background:rgba(23,42,38,.16);border:2px solid var(--nori);border-radius:var(--r);overflow:hidden}
+.feat{background:var(--rice);padding:20px}
+.feat .fi{font-size:22px}
+.feat b{display:block;font-family:"Archivo","Noto Sans TC",sans-serif;font-weight:800;font-size:15px;margin-top:8px}
+.feat p{font-size:13px;color:var(--nori-soft);margin-top:6px;line-height:1.6}
+.feat .tag{font-family:"Space Mono",monospace;font-size:9px;letter-spacing:.08em;border:1px solid var(--gogo);color:#045F52;background:#E2F7F3;border-radius:3px;padding:0 5px;margin-left:6px;vertical-align:2px}
+
+/* install cards */
+.install-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:20px}
+.icard{border:2px solid var(--nori);border-radius:var(--r);background:var(--rice);padding:22px;box-shadow:var(--shadow)}
+.icard h3{display:flex;align-items:center;gap:8px}
+.icard ol{margin:14px 0 0 2px;list-style:none;counter-reset:step}
+.icard ol li{counter-increment:step;display:flex;gap:12px;align-items:flex-start;padding:8px 0;font-size:14px;line-height:1.55}
+.icard ol li::before{content:counter(step);flex:none;width:24px;height:24px;border-radius:50%;background:var(--nori);color:var(--box);font-family:"Space Mono",monospace;font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center;margin-top:1px}
+.icard .note{margin-top:12px;font-size:12px;color:var(--nori-soft);border-left:3px solid var(--tama);padding-left:10px}
+.icard.ios{border-color:var(--tama)}
+.kbd{font-family:"Space Mono",monospace;font-size:12px;background:#F4F7F5;border:1.5px solid rgba(23,42,38,.2);border-radius:5px;padding:1px 6px;white-space:nowrap}
+
+/* send demo */
+.demo{display:grid;grid-template-columns:300px 1fr;gap:44px;align-items:center;border:2px solid var(--nori);border-radius:var(--r);background:var(--rice);padding:34px;box-shadow:var(--shadow)}
+.chute{position:relative;height:270px;border-radius:12px;background:#F1F5F3;border:2px dashed rgba(23,42,38,.2);overflow:hidden}
+.chute-lab{position:absolute;top:10px;left:0;right:0;text-align:center;font-family:"Space Mono",monospace;font-size:9.5px;letter-spacing:.14em;color:var(--nori-soft)}
+.pkg{position:absolute;left:50%;top:44px;width:112px;height:76px;margin-left:-56px;background:var(--rice);border:2px solid var(--nori);border-radius:8px;box-shadow:var(--shadow);display:flex;align-items:center;justify-content:center;font-family:"Space Mono",monospace;font-size:10px;letter-spacing:.06em;transition:transform .42s cubic-bezier(.5,0,.75,0),opacity .2s .3s}
+.chute.sent .pkg{transform:translateY(190px) scale(.72) rotate(-6deg);opacity:0}
+.slot{position:absolute;left:26px;right:26px;bottom:34px;height:52px;border:2px solid var(--nori);border-radius:9px;background:var(--gogo);display:flex;align-items:center;justify-content:center;font-family:"Archivo",sans-serif;font-weight:900;font-size:13px;color:#04302A;letter-spacing:-.01em}
+.chute.sent .slot{animation:thud .34s cubic-bezier(.3,1.6,.5,1) .3s}
+@keyframes thud{40%{transform:translateY(4px) scaleX(1.03)}100%{transform:none}}
+.receipts{list-style:none;display:flex;flex-direction:column;gap:2px;margin-top:16px}
+.receipts li{font-family:"Space Mono",monospace;font-size:11px;letter-spacing:.03em;display:flex;gap:9px;align-items:center;color:var(--nori-soft);opacity:0;transform:translateX(-6px);transition:all .3s}
+.receipts li b{color:var(--gogo);font-size:12px}
+.chute-wrap.sent .receipts li{opacity:1;transform:none}
+.chute-wrap.sent .receipts li:nth-child(1){transition-delay:.34s}
+.chute-wrap.sent .receipts li:nth-child(2){transition-delay:.42s}
+.chute-wrap.sent .receipts li:nth-child(3){transition-delay:.5s}
+.demo-btn{margin-top:20px;background:var(--nori);color:var(--box);border:0;font-family:"Archivo","Noto Sans TC",sans-serif;font-weight:800;font-size:14px;padding:11px 22px;border-radius:9px;cursor:pointer}
+.demo-btn:hover{background:var(--gogo);color:#04302A}
+.speed-list{list-style:none;display:flex;flex-direction:column;gap:14px;margin-top:22px}
+.speed-list li{display:flex;gap:14px;align-items:flex-start}
+.speed-list .k{font-family:"Space Mono",monospace;font-size:10px;font-weight:700;letter-spacing:.06em;background:var(--nori);color:var(--box);padding:2px 6px;border-radius:3px;flex:none;margin-top:2px}
+.speed-list p{font-size:13.5px;line-height:1.55}
+
+/* architecture */
+.arch{display:grid;grid-template-columns:repeat(3,1fr);gap:2px;background:rgba(23,42,38,.16);border:2px solid var(--nori);border-radius:var(--r);overflow:hidden}
+.node{background:var(--rice);padding:22px 20px;min-height:150px;display:flex;flex-direction:column}
+.node.wide{grid-column:1/-1;background:#F2F6F4}
+.node.dark{background:var(--nori);color:var(--box)}
+.node .nlab{font-family:"Space Mono",monospace;font-size:10px;letter-spacing:.12em;color:var(--nori-soft);text-transform:uppercase}
+.node.dark .nlab{color:var(--gogo)}
+.node h4{font-family:"Archivo",sans-serif;font-weight:900;font-size:17px;letter-spacing:-.02em;margin:7px 0 9px}
+.node ul{list-style:none;font-size:12.5px;line-height:1.65;color:var(--nori-soft)}
+.node.dark ul{color:rgba(230,237,234,.72)}
+.node li::before{content:"·";margin-right:7px;color:var(--gogo);font-weight:900}
+.node .seal{margin-top:auto;padding-top:12px;font-family:"Space Mono",monospace;font-size:10px;letter-spacing:.04em;color:var(--gogo)}
+.arch-note{margin-top:16px;font-size:12.5px;color:var(--nori-soft);font-family:"Space Mono",monospace;letter-spacing:.02em}
+
+/* code block */
+pre.code{background:var(--nori);color:#D9E5E1;border-radius:10px;border:2px solid var(--nori);padding:16px 18px;font-family:"Space Mono",monospace;font-size:12.5px;line-height:1.7;overflow-x:auto;margin-top:14px}
+pre.code .c{color:#7FA69C}
+pre.code .g{color:var(--gogo)}
+
+footer{border-top:2px solid rgba(23,42,38,.14);padding:44px 0 70px;text-align:center}
+footer .cta{font-size:17px;padding:14px 34px}
+footer p{margin-top:16px;font-size:12px;color:var(--nori-soft)}
+
+@media (max-width:900px){
+  .hero{grid-template-columns:1fr;gap:36px;padding-top:40px}
+  .demo{grid-template-columns:1fr;gap:28px;padding:24px}
+  .arch{grid-template-columns:1fr}
+  section{padding:52px 0}
+  .top-meta a{display:none}
+}
+@media (prefers-reduced-motion:reduce){
+  *{animation-duration:.01ms !important;animation-iteration-count:1 !important;transition-duration:.01ms !important}
+}
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="wrap top-in">
+    <a class="mark" href="/landing"><i></i>BentoDrop</a>
+    <span class="eyebrow" style="opacity:.7">便當</span>
+    <nav class="top-meta">
+      <a href="#feats">功能</a>
+      <a href="#install">安裝</a>
+      <a href="#speed">送出</a>
+      <a href="#api">API</a>
+      <a class="cta small" href="/">開始使用</a>
+    </nav>
+  </div>
+</header>
+
+<div class="wrap">
+
+  <!-- ══════════ HERO ══════════ -->
+  <div class="hero">
+    <div>
+      <p class="eyebrow">跨裝置端到端加密信箱</p>
+      <h1 style="margin-top:14px">裝好<br>送出<br><em>拆開</em></h1>
+      <p class="lede hero-sub">文字、連結、照片裝進盒子,送到你自己的其他裝置,或送給家人。伺服器只負責載運,打不開盒子。沒有帳號、沒有密碼、沒有驗證信。</p>
+      <div class="hero-cta">
+        <a class="cta" href="/">開始使用 →</a>
+        <a class="cta ghost" href="#install">裝成 App</a>
+      </div>
+      <div class="hero-stats">
+        <div class="stat"><b>1 個欄位</b><span>開通只問你的名字</span></div>
+        <div class="stat"><b>2 步</b><span>貼上 → 即送</span></div>
+        <div class="stat"><b>0 個帳號</b><span>金鑰只在你的裝置上</span></div>
+      </div>
+    </div>
+
+    <div class="bento-stage">
+      <button class="bento" id="bento" aria-label="拆開便當" aria-expanded="false">
+        <div class="box-body">
+          <div class="cell cell-main">
+            <span class="from">FROM · PIXEL 11 PRO</span>
+            <p>下午三點的會議改到會議室 B,記得帶那份合約。</p>
+          </div>
+          <div class="cell cell-act go">複製</div>
+          <div class="cell cell-act">刪除</div>
+        </div>
+        <div class="steam" aria-hidden="true"><i></i><i></i><i></i></div>
+        <div class="box-lid">
+          <span class="sticker">#8F2C · 14:07</span>
+          <span class="lid-dot"></span>
+        </div>
+        <div class="band" aria-hidden="true"></div>
+      </button>
+      <p class="bento-hint" id="bentoHint">↑ 點一下拆開</p>
+    </div>
+  </div>
+
+  <hr class="divider">
+
+  <!-- ══════════ 功能 ══════════ -->
+  <section id="feats">
+    <div class="sec-head">
+      <span class="num">01</span>
+      <h2>已經可以這樣用</h2>
+    </div>
+    <p class="sec-note">下面每一項都是現在就能用的,不是路線圖。</p>
+
+    <div class="feats">
+      <div class="feat"><span class="fi">📋</span><b>剪貼簿即送</b>
+        <p>授權一次後,開 App 就看到剪貼簿的反灰預覽 — 文字或圖片縮圖 — 按「⚡即送」直接出門。開始打字,按鈕自動變「送出」。</p></div>
+      <div class="feat"><span class="fi">📤</span><b>分享面板直送<span class="tag">Android</span></b>
+        <p>裝成 App 後,任何 App 按「分享」選 BentoDrop,背景自動加密送出,連畫面都不用操作。</p></div>
+      <div class="feat"><span class="fi">🔔</span><b>通知就是入口</b>
+        <p>通知直接顯示內容,附「複製」按鈕;是 https 連結就多一顆「開啟」。鎖定畫面不想被看到?每台裝置可各自關閉預覽。</p></div>
+      <div class="feat"><span class="fi">📷</span><b>照片自動瘦身</b>
+        <p>圖片先壓縮(長邊 2048、WebP)再加密,EXIF 與 GPS 位置自動剝除。要傳原檔也可以,會先警告你。</p></div>
+      <div class="feat"><span class="fi">🤝</span><b>加好友互送</b>
+        <p>掃 QR、按確認,就能和家人互送。用對方的公鑰加密,解除好友立刻擋下來訊。對方看不到你的裝置名稱。</p></div>
+      <div class="feat"><span class="fi">🔑</span><b>12 個字救回一切</b>
+        <p>還原碼用 BIP39 標準 12 詞,可複製、下載、列印、產 QR;還原時拍張 QR 照片就能匯入,打錯字當場抓出來。</p></div>
+      <div class="feat"><span class="fi">🤖</span><b>腳本也能推</b>
+        <p>NAS 備份完成、CI 建置結束 — 一行 curl 或附帶的 CLI 就能推到你的手機。token 只能發不能讀,外洩也看不到任何內容。</p></div>
+      <div class="feat"><span class="fi">🗑️</span><b>過期自動清空</b>
+        <p>預設 7 天自動刪除(可調 1/30 天),隨時可手動刪,所有裝置同步消失。明文模式的訊息最多只留 24 小時。</p></div>
+    </div>
+  </section>
+
+  <hr class="divider">
+
+  <!-- ══════════ 安裝 ══════════ -->
+  <section id="install">
+    <div class="sec-head">
+      <span class="num">02</span>
+      <h2>裝成 App,通知才可靠</h2>
+    </div>
+    <p class="sec-note">BentoDrop 是 PWA:不經過商店、沒有安裝包,從瀏覽器直接「裝」。裝了之後有推送通知、出現在分享面板(Android),體驗和原生 App 一樣。</p>
+
+    <div class="install-grid">
+      <div class="icard">
+        <h3>🤖 Android(Chrome)</h3>
+        <ol>
+          <li>用 Chrome 開啟 <span class="kbd">bentodrop.ai-apps.work</span></li>
+          <li>畫面上會出現「安裝」提示,或按右上 <span class="kbd">⋮</span> → <span class="kbd">安裝應用程式</span></li>
+          <li>開啟 App,在設定按「啟用本機通知」</li>
+        </ol>
+      </div>
+
+      <div class="icard ios">
+        <h3>🍎 iPhone / iPad(Safari)</h3>
+        <ol>
+          <li>用 <b>Safari</b> 開啟 <span class="kbd">bentodrop.ai-apps.work</span></li>
+          <li>按底部中間的分享鈕 <span class="kbd">⎋</span>(方框加向上箭頭)</li>
+          <li>往下捲,點 <span class="kbd">加入主畫面</span> → <span class="kbd">加入</span></li>
+          <li><b>之後一律從主畫面圖示開啟</b>,再到設定按「啟用本機通知」</li>
+        </ol>
+        <p class="note">iOS 一定要「加入主畫面」才有推送通知,在 Safari 分頁裡開是收不到的。iOS 支援目前標示為實驗性。</p>
+      </div>
+
+      <div class="icard">
+        <h3>💻 電腦(Chrome / Edge)</h3>
+        <ol>
+          <li>開啟 <span class="kbd">bentodrop.ai-apps.work</span></li>
+          <li>點網址列右側的安裝圖示(螢幕加向下箭頭),或 <span class="kbd">⋮</span> → <span class="kbd">安裝</span></li>
+          <li>安裝後它就是一個獨立視窗的 App</li>
+        </ol>
+      </div>
+    </div>
+  </section>
+
+  <hr class="divider">
+
+  <!-- ══════════ 送出的速度感 ══════════ -->
+  <section id="speed">
+    <div class="sec-head">
+      <span class="num">03</span>
+      <h2>送出要像丟進外送箱</h2>
+    </div>
+    <p class="sec-note">沒有轉圈、沒有進度條、沒有「傳送中…」。按下去的那一刻畫面就當它成功了,失敗才回頭修正。</p>
+
+    <div class="demo">
+      <div class="chute-wrap" id="chuteWrap">
+        <div class="chute" id="chute">
+          <p class="chute-lab">送到我的全部裝置</p>
+          <div class="pkg">#8F2C</div>
+          <div class="slot">已送達</div>
+        </div>
+        <ul class="receipts">
+          <li><b>✓</b> Pixel 11 Pro · 0.4s</li>
+          <li><b>✓</b> MacBook · 0.6s</li>
+          <li><b>✓</b> Chromebook · 0.6s</li>
+        </ul>
+      </div>
+
+      <div>
+        <p class="eyebrow">速度是設計決策,不是效能指標</p>
+        <ul class="speed-list">
+          <li><span class="k">即送</span>
+            <p><b>剪貼簿有東西就先擺好。</b>開 App 看到的第一眼就是預覽和一顆「⚡即送」。點預覽可以改成手動編輯 — 你永遠知道按下去會送出什麼。</p></li>
+          <li><span class="k">兩跳</span>
+            <p><b>短文字不落地。</b>2 KB 以內直接塞進推送封包,從按下到另一台震動只有一跳,沒有上傳再下載這回事。</p></li>
+          <li><span class="k">預設</span>
+            <p><b>不問你要送給誰。</b>預設送到自己的全部裝置;要送給好友,收件人選單選一下就好,不擋在路上。</p></li>
+          <li><span class="k">回執</span>
+            <p><b>逐台打勾取代進度條。</b>每台裝置各自打勾,比一根不知道跑到哪的長條有訊息量。</p></li>
+        </ul>
+        <button class="demo-btn" id="demoBtn">再送一次</button>
+      </div>
+    </div>
+  </section>
+
+  <hr class="divider">
+
+  <!-- ══════════ API ══════════ -->
+  <section id="api">
+    <div class="sec-head">
+      <span class="num">04</span>
+      <h2>腳本推送:Pushbullet 留下的位子</h2>
+    </div>
+    <p class="sec-note">在設定頁建立 API token(只能發、不能讀、可隨時撤銷)。兩種模式,取捨標得清清楚楚。</p>
+
+    <h3>加密模式 — token 只拿公鑰</h3>
+    <pre class="code"><span class="c"># repo 附的零依賴 CLI(Node 18+),內容用你的身分公鑰加密</span>
+BENTODROP_URL=https://bentodrop.ai-apps.work \
+BENTODROP_TOKEN=bd_xxx \
+node cli/bentodrop-push.mjs <span class="g">"建置完成 ✓"</span></pre>
+    <p class="sec-note" style="margin-bottom:8px">token 外洩的後果只有「能發垃圾訊息」— 讀不到任何內容,包括它自己發過的。</p>
+
+    <h3 style="margin-top:28px">明文模式 — 一行 curl 就好</h3>
+    <pre class="code"><span class="c"># 建 token 時要勾「明文模式」;收件匣會標「未加密」,24 小時後自動刪</span>
+curl -X POST https://bentodrop.ai-apps.work/api/push \
+  -H <span class="g">"Authorization: Bearer bd_xxx"</span> \
+  -H "content-type: application/json" \
+  -d '{"text":"每日備份完成,共 42 GB"}'</pre>
+  </section>
+
+  <hr class="divider">
+
+  <!-- ══════════ 架構 ══════════ -->
+  <section id="arch">
+    <div class="sec-head">
+      <span class="num">05</span>
+      <h2>盒子鎖著送,司機打不開</h2>
+    </div>
+    <p class="sec-note">加密在你的裝置上做完才交出去,伺服器只是一個看不見內容的路由器。這不是附加功能,是決定其他所有東西怎麼做的前提。</p>
+
+    <div class="arch">
+      <div class="node">
+        <p class="nlab">你的裝置 · 裝好</p>
+        <h4>發送端</h4>
+        <ul>
+          <li>圖片先壓縮(長邊 2048)</li>
+          <li>剝掉 EXIF,GPS 不跟著走</li>
+          <li>隨機金鑰加密內容與檔名</li>
+          <li>金鑰再用主金鑰包起來</li>
+        </ul>
+        <p class="seal">明文到此為止 ▼</p>
+      </div>
+
+      <div class="node dark">
+        <p class="nlab">Cloudflare Worker · 送</p>
+        <h4>只負責載運</h4>
+        <ul>
+          <li>查出你有哪些裝置</li>
+          <li>簽一張上傳單給大檔案</li>
+          <li>把通知推給每一台</li>
+          <li>清掉失效與過期的東西</li>
+        </ul>
+        <p class="seal">全程只看得到密文</p>
+      </div>
+
+      <div class="node">
+        <p class="nlab">另一台裝置 · 拆開</p>
+        <h4>接收端</h4>
+        <ul>
+          <li>通知直接顯示內容</li>
+          <li>複製、或開啟 https 連結</li>
+          <li>只認 https,絕不自動跳轉</li>
+          <li>好友訊息用身分私鑰解</li>
+        </ul>
+        <p class="seal">▲ 明文從這裡恢復</p>
+      </div>
+
+      <div class="node wide">
+        <p class="nlab">保險箱 R2 · 冰箱</p>
+        <h4>大東西才放進來,而且會過期</h4>
+        <ul style="columns:2;column-gap:36px">
+          <li>2 KB 以內的文字完全不進來,直接走推送</li>
+          <li>照片與檔案由裝置直接上傳,不經手明文</li>
+          <li>放進來的一律是密文,檔名也加密</li>
+          <li>預設 7 天自動清掉,隨時可手動刪</li>
+        </ul>
+      </div>
+    </div>
+    <p class="arch-note">// 伺服器仍看得到誰在什麼時候送、多大。這不是元資料隱私系統,我們不假裝它是。</p>
+  </section>
+
+  <footer>
+    <a class="cta" href="/">開始使用 →</a>
+    <p class="mono">BENTODROP · 便當 · 開源於 GitHub · 部署在 Cloudflare Workers</p>
+  </footer>
+
+</div>
+
+<script>
+(function(){
+  var bento = document.getElementById('bento');
+  var hint = document.getElementById('bentoHint');
+  if (bento) {
+    bento.addEventListener('click', function(){
+      var open = bento.classList.toggle('is-open');
+      bento.setAttribute('aria-expanded', open ? 'true' : 'false');
+      hint.textContent = open ? '↑ 再點一下蓋回去' : '↑ 點一下拆開';
+    });
+    setTimeout(function(){
+      if (!bento.classList.contains('is-open')) bento.click();
+    }, 900);
+  }
+
+  var chute = document.getElementById('chute');
+  var wrap = document.getElementById('chuteWrap');
+  var btn = document.getElementById('demoBtn');
+  function send(){
+    chute.classList.remove('sent'); wrap.classList.remove('sent');
+    void chute.offsetWidth;
+    chute.classList.add('sent'); wrap.classList.add('sent');
+  }
+  if (btn) btn.addEventListener('click', send);
+  if ('IntersectionObserver' in window && chute) {
+    var io = new IntersectionObserver(function(es){
+      es.forEach(function(e){ if (e.isIntersecting){ send(); io.disconnect(); } });
+    }, {threshold:.45});
+    io.observe(chute);
+  }
+})();
+</script>
+</body>
+</html>

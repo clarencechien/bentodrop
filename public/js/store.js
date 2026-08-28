@@ -63,6 +63,7 @@ export const K = {
   BACKED_UP: "backedUpAt",     // §6.5 backup prompt bookkeeping
   BACKUP_PROMPTED: "backupPromptedAt",
   NOTIFY_PREVIEW: "notifyPreview", // §6.3 per-device notification privacy switch
+  INSTALL_DISMISSED: "installDismissed", // install-PWA banner closed on this device
   IDENTITY_WRAPPED: "identityWrapped", // user-level identity private key, K_master-wrapped (§5.2)
   VAPID: "vapidPublicKey",
 };

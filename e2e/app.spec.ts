@@ -437,6 +437,45 @@ test("settings: retention, API token lifecycle with 未加密 marking (§12)", a
   await context.close();
 });
 
+test("landing page: manual at /landing, 開始使用 leads back to the app", async ({ browser, baseURL }) => {
+  const { context, page } = await newDeviceContext(browser, baseURL!);
+  await page.goto("/landing");
+  await expect(page).toHaveTitle(/BentoDrop/);
+  await expect(page.getByRole("heading", { name: "已經可以這樣用" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "裝成 App,通知才可靠" })).toBeVisible();
+  await expect(page.getByText("加入主畫面", { exact: false }).first()).toBeVisible(); // iOS steps present
+
+  // 開始使用 → the app itself (onboarding for a fresh browser).
+  await page.getByRole("link", { name: "開始使用 →" }).first().click();
+  await expect(page).toHaveURL(`${baseURL}/`);
+  await expect(page.getByRole("heading", { name: "你叫什麼名字?" })).toBeVisible();
+  await context.close();
+});
+
+test("install banner: shows in a browser tab, opens platform steps, dismiss persists", async ({ browser, baseURL }) => {
+  const { context, page } = await newDeviceContext(browser, baseURL!);
+  await onboard(page, "installer");
+
+  // Not standalone → the banner sits above the inbox.
+  const banner = page.locator("#installBanner");
+  await expect(banner).toBeVisible();
+  await expect(banner).toContainText("裝成 App");
+
+  // No beforeinstallprompt in headless → the button opens the how-to guide.
+  await banner.getByRole("button", { name: "怎麼裝?" }).click();
+  await expect(page.locator(".modal")).toContainText(/安裝到|加入.*主畫面/);
+  await expect(page.locator(".modal .install-steps li").first()).toBeVisible();
+  await page.locator(".modal-back").click({ position: { x: 5, y: 5 } });
+
+  // Dismiss is remembered per device.
+  await banner.getByRole("button", { name: "關閉安裝提示" }).click();
+  await expect(banner).toBeHidden();
+  await page.reload();
+  await expect(page.locator(".paste-dock")).toBeVisible();
+  await expect(page.locator("#installBanner")).toHaveCount(0);
+  await context.close();
+});
+
 test("service worker registers and the manifest is installable", async ({ browser, baseURL }) => {
   const { context, page } = await newDeviceContext(browser, baseURL!);
   await onboard(page, "sw-user");
