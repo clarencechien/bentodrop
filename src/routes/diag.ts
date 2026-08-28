@@ -53,13 +53,20 @@ export async function diagEnv(req: Request, env: Env, device: DeviceCtx): Promis
     return ms;
   };
 
-  const limited = await rateLimit(env, device, "env", RUNS_PER_HOUR);
+  // Every await must run inside timed() — anything untimed would get
+  // misattributed to workerTimeMs and quietly lie about CPU cost.
+  let limited: Response | null = null;
+  await timed(async () => {
+    limited = await rateLimit(env, device, "env", RUNS_PER_HOUR);
+  });
   if (limited) return limited;
 
   // Probe object for HEAD/GET timing; (re)create if missing.
-  if (!(await env.INBOX.head(PROBE_KEY))) {
-    await env.INBOX.put(PROBE_KEY, crypto.getRandomValues(new Uint8Array(PROBE_BYTES)) as unknown as ArrayBuffer);
-  }
+  await timed(async () => {
+    if (!(await env.INBOX.head(PROBE_KEY))) {
+      await env.INBOX.put(PROBE_KEY, crypto.getRandomValues(new Uint8Array(PROBE_BYTES)) as unknown as ArrayBuffer);
+    }
+  });
 
   const headSamples: number[] = [];
   const getSamples: number[] = [];
@@ -75,7 +82,7 @@ export async function diagEnv(req: Request, env: Env, device: DeviceCtx): Promis
     putSamples.push(await timed(() =>
       env.INBOX.put(putKey, crypto.getRandomValues(new Uint8Array(PROBE_BYTES)) as unknown as ArrayBuffer),
     ));
-    await env.INBOX.delete(putKey);
+    await timed(() => env.INBOX.delete(putKey));
     d1Samples.push(await timed(() => env.DB.prepare("SELECT 1").first()));
   }
 

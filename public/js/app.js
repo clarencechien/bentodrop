@@ -1340,7 +1340,7 @@ async function renderSettings() {
         </div>
       </div>
 
-      <button class="btn ghost" id="stBack" type="button">回收件匣</button>
+      <button class="btn ghost" id="stBack" type="button" style="margin-bottom:56px">回收件匣</button>
     </div>`);
   $app.replaceChildren(root);
 
@@ -1531,24 +1531,27 @@ async function renderSettings() {
   async function paintTokens() {
     const { tokens } = await api.listTokens();
     $tok.replaceChildren();
-    if (!tokens.length) $tok.append(el(`<p class="small muted">還沒有 token。</p>`));
-    for (const t of tokens) {
+    // Revoked tokens are dead — don't let them take up space.
+    const active = tokens.filter((t) => !t.revokedAt);
+    const revokedCount = tokens.length - active.length;
+    if (!active.length) $tok.append(el(`<p class="small muted">還沒有${revokedCount ? "有效的 " : " "}token。</p>`));
+    for (const t of active) {
       const row = el(`
         <div class="tok-row">
           <b>${esc(t.label)}</b>
           ${t.plaintextOk ? '<span class="tagx">未加密</span>' : ""}
           <span class="small muted mono">${t.rateLimit}/hr${t.lastUsedAt ? " · 上次 " + fmtTime(t.lastUsedAt) : ""}</span>
-          ${t.revokedAt ? '<span class="small muted">已撤銷</span>' : ""}
         </div>`);
-      if (!t.revokedAt) {
-        const rv = el(`<button class="btn ghost inline" type="button" style="margin-left:auto">撤銷</button>`);
-        rv.onclick = async () => {
-          await api.revokeToken(t.tokenId).catch((err) => toast(err.message, true));
-          paintTokens();
-        };
-        row.append(rv);
-      }
+      const rv = el(`<button class="btn ghost inline" type="button" style="margin-left:auto">撤銷</button>`);
+      rv.onclick = async () => {
+        await api.revokeToken(t.tokenId).catch((err) => toast(err.message, true));
+        paintTokens();
+      };
+      row.append(rv);
       $tok.append(row);
+    }
+    if (revokedCount) {
+      $tok.append(el(`<p class="small muted" style="margin-top:6px">已撤銷 ${revokedCount} 個 token,不再顯示。</p>`));
     }
   }
   paintTokens().catch(() => {});

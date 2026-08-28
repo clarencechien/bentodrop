@@ -425,10 +425,12 @@ test("settings: retention, API token lifecycle with 未加密 marking (§12)", a
   await expect(card.locator(".tagx")).toHaveText("未加密");
   await expect(card).toContainText("NAS 備份腳本");
 
-  // Revoke → token stops working immediately.
+  // Revoke → the row disappears (dead tokens don't take up space) and the
+  // token stops working immediately.
   await page.getByRole("button", { name: "設定" }).click();
   await page.locator(".tok-row", { hasText: "NAS 備份腳本" }).getByRole("button", { name: "撤銷" }).click();
-  await expect(page.locator(".tok-row", { hasText: "NAS 備份腳本" })).toContainText("已撤銷");
+  await expect(page.locator(".tok-row", { hasText: "NAS 備份腳本" })).toHaveCount(0);
+  await expect(page.locator("#tokList")).toContainText("已撤銷 1 個 token");
   const res2 = await page.request.post("/api/push", {
     headers: { authorization: `Bearer ${token}` },
     data: { text: "should fail" },

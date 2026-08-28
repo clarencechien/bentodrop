@@ -149,6 +149,23 @@ scripts/                deploy(零設定部署)/ gen-vapid / gen-icons / e2e-ser
 - 「複製報告」產出純文字(含原始數據、UA、colo),可直接貼 issue
 - 隔離與安全:全端點裝置認證;key 由 Worker 組在 `diag/{userId}/` 下(不收客戶端 key);上限 5MB/echo 64KB;每裝置每小時 20 次;**不建 messages 列、不觸發推送**;測完客戶端即刪,cron 每 15 分鐘掃掉 >1 小時的殘留,R2 lifecycle(diag/ 1 天)為第三道保險
 
+### 實測結果(2026-08-28,對 spec §3.3「為什麼不做 WebRTC」的裁決)
+
+台灣使用者、Pixel(行動網路)與 Chromebook(WiFi)實機各一輪:
+
+| | Chromebook | Pixel |
+|---|---|---|
+| 邊緣節點 | **SJC(聖荷西,非 TPE)** | SJC |
+| 你→邊緣 RTT | 205 ms | 196 ms |
+| 邊緣→R2 GET | 45 ms ✓ | 68 ms ✓ |
+| 1 MB 端到端 | 1533 ms | 2517 ms(上傳 1861) |
+| 圖片壓縮 | 295 ms | 315 ms ⚠ CPU |
+
+**結論:**
+1. **繞路存在,但不在 R2** — 台灣流量被路由到美西 SJC(ISP 與 Cloudflare 免費方案的 peering 現實,非程式可修);R2/D1 與 edge 同區,搬 bucket 目前沒有意義,除非流量改從 TPE 進
+2. 每次 API 呼叫付 ~200ms 台美 RTT;小訊息的耗時幾乎全是 round trip 疊加
+3. **WebRTC 暫不做**:1.5–2.5s 屬可用範圍;更便宜的優化排在前面 — 推送到達時 SW 背景預取(消掉下載段的體感)、合併簽名與上傳回報(省一次 RTT)。若日後 ISP 路由改善或做了預取仍嫌慢,再重開此題
+
 ## 分享捷徑(Android)
 
 安裝 PWA 後,BentoDrop 會出現在 Android 的系統分享面板(Web Share Target)。從任何 App 分享文字、連結或圖片 → 選 BentoDrop → **Service Worker 直接在背景完成壓縮、加密、上傳、送出**,畫面只會閃一下「分享內容已加密送達 ✓」,不需要在 App 裡再操作。
