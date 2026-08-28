@@ -3,6 +3,24 @@ import { PUSH_TTL_TEXT_S } from "../types";
 import { apiError, json, readJson } from "../lib/util";
 import { fanoutPush } from "../fanout";
 
+// The Worker POSTs (VAPID-signed, encrypted) to whatever endpoint a device
+// registers — an SSRF surface if left open to arbitrary hosts. Every browser
+// push service lives on one of these; self-hosted distributors (UnifiedPush,
+// ntfy) can be admitted via the PUSH_ENDPOINT_ALLOW env var.
+const PUSH_ENDPOINT_HOSTS = [
+  "fcm.googleapis.com",                  // Chrome / Edge / Brave / Opera / Samsung
+  "updates.push.services.mozilla.com",   // Firefox
+  "web.push.apple.com",                  // Safari
+  "notify.windows.net",                  // WNS (per-tenant subdomains)
+];
+
+function pushEndpointAllowed(hostname: string, env: Env): boolean {
+  const extra = (env.PUSH_ENDPOINT_ALLOW ?? "").split(",").map((h) => h.trim().toLowerCase()).filter(Boolean);
+  return [...PUSH_ENDPOINT_HOSTS, ...extra].some(
+    (h) => hostname === h || hostname.endsWith("." + h),
+  );
+}
+
 /** POST /api/subscribe (device auth) — upsert this device's push subscription (§8.3 #3). */
 export async function handleSubscribe(req: Request, env: Env, device: DeviceCtx): Promise<Response> {
   const body = await readJson<{ endpoint?: string; keys?: { p256dh?: string; auth?: string } }>(req);
@@ -17,6 +35,10 @@ export async function handleSubscribe(req: Request, env: Env, device: DeviceCtx)
     return apiError(400, "bad_subscription", "endpoint must be a URL");
   }
   if (u.protocol !== "https:") return apiError(400, "bad_subscription", "endpoint must be https");
+  if (!pushEndpointAllowed(u.hostname.toLowerCase(), env)) {
+    return apiError(400, "bad_subscription",
+      "unknown push service — self-hosted push needs its host added to PUSH_ENDPOINT_ALLOW");
+  }
 
   await env.DB.prepare(
     `INSERT INTO subscriptions (device_id, endpoint, p256dh, auth, updated_at, fail_count)

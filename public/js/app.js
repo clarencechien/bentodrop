@@ -505,43 +505,62 @@ function renderInbox() {
     }
   }
 
-  async function sendFileNow(file, { original = false } = {}) {
+  // Compress + thumb + encrypt for the given recipient (null = self).
+  // Shared by the send path and the prewarm path; only the send path toasts.
+  async function buildFileEnvelope(file, { original = false, target = null, quiet = false } = {}) {
+    const prepared = await compressOffThread(file, original);
+    if (!quiet && !prepared.compressed && isImage(file) && !original) {
+      toast(isHeic(file) ? "這張圖無法在瀏覽器中壓縮,將以原檔傳送(含 EXIF)" : "無法壓縮,以原檔傳送(含 EXIF)", true);
+    }
+    // Encrypted thumbnail for the notification (README 優化 #5) — best
+    // effort, and rebuilt without it if the push budget is exceeded.
+    let thumbBytes = null;
+    if (/^image\//.test(prepared.mime)) {
+      thumbBytes = await makeThumb(prepared.bytes, prepared.mime).catch(() => null);
+    }
+    const build = (thumb) => target
+      ? C.encryptFileEnvelopeFor(target.peerPubkey, state.userId, prepared.bytes, prepared.name, prepared.mime, thumb)
+      : C.encryptFileEnvelope(state.kMaster, state.userId, prepared.bytes, prepared.name, prepared.mime, thumb);
+    let { envelope, ciphertext } = await build(thumbBytes);
+    if (thumbBytes && JSON.stringify(envelope).length > 3500) {
+      ({ envelope, ciphertext } = await build(null));
+    }
+    return { envelope, ciphertext };
+  }
+
+  async function sendFileNow(file, { original = false, pre = null } = {}) {
     const $status = root.querySelector("#sendStatus");
     if (original && isImage(file)) {
       toast("原檔模式:EXIF 與 GPS 位置會完整保留", true);
     }
     $status.replaceChildren(el(`<ul class="receipts"><li><b>…</b> 處理中</li></ul>`));
     try {
-      const prepared = await compressOffThread(file, original);
-      if (!prepared.compressed && isImage(file) && !original) {
-        toast(isHeic(file) ? "這張圖無法在瀏覽器中壓縮,將以原檔傳送(含 EXIF)" : "無法壓縮,以原檔傳送(含 EXIF)", true);
-      }
-      // Encrypted thumbnail for the notification (README 優化 #5) — best
-      // effort, and rebuilt without it if the push budget is exceeded.
-      let thumbBytes = null;
-      if (/^image\//.test(prepared.mime)) {
-        thumbBytes = await makeThumb(prepared.bytes, prepared.mime).catch(() => null);
-      }
       const target = currentTarget();
-      const build = (thumb) => target
-        ? C.encryptFileEnvelopeFor(target.peerPubkey, state.userId, prepared.bytes, prepared.name, prepared.mime, thumb)
-        : C.encryptFileEnvelope(state.kMaster, state.userId, prepared.bytes, prepared.name, prepared.mime, thumb);
-      let { envelope, ciphertext } = await build(thumbBytes);
-      if (thumbBytes && JSON.stringify(envelope).length > 3500) {
-        ({ envelope, ciphertext } = await build(null));
+      let res = null;
+
+      // Prewarmed intent (README 優化 #7): everything up to the PUT already
+      // happened while the preview idled — one round trip left. Any failure
+      // (expired, consumed, rejected) silently redoes the full flow below.
+      if (pre) {
+        try {
+          res = await api.putObject(pre.intent.url, pre.ciphertext);
+          if (!res.msgId) res = null;
+        } catch { res = null; }
       }
 
-      // Merged flow (README 優化 #2): intent → PUT finalizes in one go.
-      // Any failure falls back to the classic sign → PUT → send flow.
-      let res;
-      try {
-        const intent = await api.uploadIntent(envelope, target?.peerUserId);
-        res = await api.putObject(intent.url, ciphertext);
-        if (!res.msgId) throw new Error("intent not finalized");
-      } catch {
-        const up = await api.uploadUrl(envelope.id, ciphertext.byteLength);
-        await api.putObject(up.url, ciphertext);
-        res = await api.send(envelope, target?.peerUserId);
+      if (!res) {
+        const { envelope, ciphertext } = await buildFileEnvelope(file, { original, target });
+        // Merged flow (README 優化 #2): intent → PUT finalizes in one go.
+        // Any failure falls back to the classic sign → PUT → send flow.
+        try {
+          const intent = await api.uploadIntent(envelope, target?.peerUserId);
+          res = await api.putObject(intent.url, ciphertext);
+          if (!res.msgId) throw new Error("intent not finalized");
+        } catch {
+          const up = await api.uploadUrl(envelope.id, ciphertext.byteLength);
+          await api.putObject(up.url, ciphertext);
+          res = await api.send(envelope, target?.peerUserId);
+        }
       }
       showReceipts($status, res.receipts, target?.label);
       await refreshMessages().catch(() => {});
@@ -567,6 +586,51 @@ function renderInbox() {
   let clipReadable = false; // permission granted → allowed to auto-preview
   let lastSentSig = null;   // avoid re-offering content that was just sent
   const clipSig = (c) => (c.kind === "text" ? `t:${c.text}` : `i:${c.type}:${c.blob.size}`);
+
+  // ── intent prewarm (README 優化 #7) ───────────────────────────────────
+  // While an image preview idles under the ⚡即送 button, compress + encrypt
+  // + open the upload intent in the background, so the tap itself is one
+  // PUT (2 RTT → 1 RTT, plus ~300ms compression off the tap path). A wasted
+  // intent (user cancels, edits, switches recipient) is harmless: single
+  // use, 10-minute TTL, re-validated at finalize. Never touches the UI.
+  let prewarm = null;         // {sig, targetId, file, ciphertext, intent}
+  let prewarmGen = 0;         // invalidates in-flight prewarms after state changes
+  let prewarmInflight = null; // "sig|targetId" of a build in progress
+  const clipFile = (c) => new File([c.blob], `clipboard.${c.type.split("/")[1] ?? "png"}`, { type: c.type });
+
+  async function prewarmClipImage() {
+    if (clip?.kind !== "image" || clipSig(clip) === lastSentSig) return;
+    const sig = clipSig(clip);
+    const targetId = $target.value;
+    const key = `${sig}|${targetId}`;
+    if (prewarmInflight === key) return; // same build already running
+    if (prewarm && prewarm.sig === sig && prewarm.targetId === targetId
+        && prewarm.intent.expiresAt - 30_000 > Date.now()) return; // still hot
+    const gen = ++prewarmGen;
+    prewarmInflight = key;
+    prewarm = null;
+    try {
+      const file = clipFile(clip);
+      const target = currentTarget();
+      const { envelope, ciphertext } = await buildFileEnvelope(file, { target, quiet: true });
+      if (gen !== prewarmGen) return; // clip/recipient changed mid-build
+      const intent = await api.uploadIntent(envelope, target?.peerUserId);
+      if (gen !== prewarmGen) return;
+      prewarm = { sig, targetId, file, ciphertext, intent };
+    } catch { /* prewarm is an optimization, never a failure */ }
+    finally {
+      if (prewarmInflight === key) prewarmInflight = null;
+    }
+  }
+
+  function takePrewarm(c) {
+    const p = prewarm;
+    prewarm = null;
+    prewarmGen++;
+    if (p && p.sig === clipSig(c) && p.targetId === $target.value
+        && p.intent.expiresAt - 30_000 > Date.now()) return p;
+    return null;
+  }
 
   async function readClipboard({ interactive = false } = {}) {
     if (!navigator.clipboard) return null;
@@ -633,7 +697,9 @@ function renderInbox() {
     clipReadable = perm?.state === "granted";
     if (clipReadable) clip = await readClipboard();
     updateComposeUI();
+    prewarmClipImage();
   }
+  $target.addEventListener("change", () => prewarmClipImage());
 
   $text.addEventListener("input", updateComposeUI);
   $preview.onclick = () => {
@@ -669,7 +735,7 @@ function renderInbox() {
     }
     const ok = c.kind === "text"
       ? await sendTextNow(c.text)
-      : await sendFileNow(new File([c.blob], `clipboard.${c.type.split("/")[1] ?? "png"}`, { type: c.type }));
+      : await sendFileNow(clipFile(c), { pre: takePrewarm(c) });
     if (ok) {
       lastSentSig = clipSig(c);
       clip = null;

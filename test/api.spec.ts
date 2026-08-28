@@ -263,6 +263,28 @@ describe("file path (§3.2, §4.3)", () => {
 });
 
 describe("subscription lifecycle (§8.3)", () => {
+  it("accepts only known push services plus PUSH_ENDPOINT_ALLOW hosts", async () => {
+    const dev = await createDevice();
+    const keys = { p256dh: "AA", auth: "BB" };
+    const sub = (endpoint: string) =>
+      apiFetch("/api/subscribe", { token: dev.token, body: { endpoint, keys } });
+
+    for (const ok of [
+      "https://fcm.googleapis.com/fcm/send/abc123",
+      "https://updates.push.services.mozilla.com/wpush/v2/xyz",
+      "https://web.push.apple.com/QOTvXtgSXsjAAoCz",
+      "https://db5p.notify.windows.net/w/?token=abc",
+      "https://push.test/sub/extra", // via PUSH_ENDPOINT_ALLOW
+    ]) expect((await sub(ok)).status, ok).toBe(200);
+
+    for (const bad of [
+      "https://evil.example/collect",
+      "https://fcm.googleapis.com.evil.example/x", // suffix spoof
+      "https://notify.windows.net.attacker.dev/x",
+      "http://fcm.googleapis.com/fcm/send/abc",    // not https
+    ]) expect((await sub(bad)).status, bad).toBe(400);
+  });
+
   it("deletes the subscription immediately on 410 Gone", async () => {
     const a = await createDevice();
     const b = await pairNewDevice(a);

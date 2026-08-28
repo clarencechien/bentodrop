@@ -241,11 +241,21 @@ test("clipboard composer: image clipboard shows a thumbnail and 即送 sends it 
     const blob: Blob = await new Promise((r) => canvas.toBlob((b) => r(b!), "image/png"));
     await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
   });
+
+  // Prewarm (優化 #7): the upload intent opens in the background while the
+  // preview idles, so the 即送 tap itself is a single PUT.
+  const intentReqs: number[] = [];
+  page.on("request", (r) => {
+    if (r.url().includes("/api/upload-intent")) intentReqs.push(Date.now());
+  });
   await page.reload();
   await expect(page.locator("#clipPreview img")).toBeVisible();
   await expect(page.locator("#sendBtn")).toContainText("即送");
+  await expect.poll(() => intentReqs.length, { timeout: 10_000 }).toBe(1); // prewarmed before any tap
+
   await page.locator("#sendBtn").click();
   await expect(page.locator("#sendStatus")).toContainText(/已送達|✓/);
+  expect(intentReqs.length).toBe(1); // the tap consumed the prewarm — no second intent
   await refreshInbox(page);
   await expect(page.locator(".mini.img", { hasText: "clipboard" })).toBeVisible();
   await context.close();

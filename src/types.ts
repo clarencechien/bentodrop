@@ -6,6 +6,9 @@ export interface Env {
   VAPID_SUBJECT: string;
   VAPID_PRIVATE_JWK: string;
   URL_SIGNING_SECRET: string;
+  /** Optional comma-separated extra push-endpoint hosts (exact or suffix match),
+   *  for UnifiedPush/ntfy-style self-hosted push services. */
+  PUSH_ENDPOINT_ALLOW?: string;
 }
 
 // Spec constants
