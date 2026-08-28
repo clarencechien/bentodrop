@@ -72,8 +72,8 @@ npm run dev        # wrangler dev(本機 D1/R2);首次先跑:
 
 ```bash
 npm run typecheck   # tsc
-npm test            # 94 項整合/單元測試(真 workerd + 真 D1/R2 模擬)
-npm run test:e2e    # 19 項 Playwright E2E(真瀏覽器 + wrangler dev)
+npm test            # 113 項整合/單元測試(真 workerd + 真 D1/R2 模擬)
+npm run test:e2e    # 23 項 Playwright E2E(真瀏覽器 + wrangler dev)
 npm run test:all    # 以上全部
 ```
 
@@ -92,12 +92,14 @@ npm run test:all    # 以上全部
 | `qr.spec.ts` | 配對 QR 以獨立解碼器(jsQR)往返驗證;fragment 不出瀏覽器 |
 | `tokens.spec.ts` | token 只顯示一次/只存 hash、撤銷立即生效、send-only(不能讀)、明文模式 opt-in/2000 bytes 上限/拒收檔案/速率限制、§12.3 ecdh-p256 協定通道、拒收 self-wrap |
 | `cleanup.spec.ts` | Cron 清理過期訊息(D1+R2)與配對、冪等 |
+| `diag.spec.ts` | 診斷端點:`/api/diag/env` 誠實計時(所有 IO 都在 timed 內)、上傳 URL 由伺服器組 key(只落在 `diag/{userId}/`)、只能刪自己的 diag 物件、echo 上限、速率限制、cron 清殘留不動 probe |
+| `perf.spec.ts` | 合併上傳(intent 開單→PUT 定案→回執):單次燒毀、過期/大小/好友關係在定案時重查(失敗即刪物件)、HMAC 去 intent 竄改、縮圖 envelope 往返與 413 預算、推送 probe 只送指定裝置 |
 
 ### E2E 測試(`e2e/`,Playwright)
 
 真 Chromium 開兩個獨立瀏覽器 context 當兩台裝置,跑在 `wrangler dev` 上(`scripts/e2e-server.sh` 自動產生 `.dev.vars`、套本機 migrations、每次重置本機狀態):
 
-onboarding 單欄位開通與 IndexedDB 持久化、送文字給自己(加密→拉取→解密→複製 UI)、`https://` 才有「開啟連結」且永不自動跳轉、`javascript:` 當純文字、全域刪除、檔案加密上傳/下載解密(檔名解密顯示)、**完整雙裝置配對流程**(QR 連結+配對碼→別名→舊裝置確認→K_master 移轉→跨裝置解密→備份提示)、**加好友流程**(兩個瀏覽器 context 當兩個 user:邀請→輸碼→確認→ecdh 跨 user 收發)、剪貼簿 composer(文字/圖片預覽、即送/送出切換、點預覽編輯)、**share-target**(對真 SW 發文字/圖片/空分享)、備份抽 3 詞驗證、還原碼還原(含 checksum 抓錯 + QR 照片匯入)、裝置改名、landing 頁與安裝橫幅、設定頁(保留期、API token 建立/未加密標示/實際推送/撤銷)、Service Worker 註冊與 manifest 可安裝。
+onboarding 單欄位開通與 IndexedDB 持久化、送文字給自己(加密→拉取→解密→複製 UI)、`https://` 才有「開啟連結」且永不自動跳轉、`javascript:` 當純文字、全域刪除、檔案加密上傳/下載解密(檔名解密顯示,走合併上傳流程)、**完整雙裝置配對流程**(QR 連結+配對碼→別名→舊裝置確認→K_master 移轉→跨裝置解密→備份提示)、**加好友流程**(兩個瀏覽器 context 當兩個 user:邀請→輸碼→確認→ecdh 跨 user 收發)、剪貼簿 composer(文字/圖片預覽、即送/送出切換、點預覽編輯)、**share-target**(對真 SW 發文字/圖片/空分享)、通知「複製」action 的 app 端處理(SW `copy-msg` 訊息→解密→複製)、**預取快取**(檔案通知到手即背景抓好:點開即現;快取未命中則縮圖預覽+下載按鈕)、收件匣離線首繪(API 掛掉仍先畫上次快取)、備份抽 3 詞驗證、還原碼還原(含 checksum 抓錯 + QR 照片匯入)、裝置改名、landing 頁與安裝橫幅、設定頁(保留期、API token 建立/未加密標示/實際推送/撤銷、撤銷後從列表消失)、傳輸診斷完整跑一輪(上傳=刪除、報告產出)、Service Worker 註冊與 manifest 可安裝。
 
 Web Push 本身(瀏覽器端訂閱與通知顯示)無法在 headless 環境完整重現,推送管線改由整合測試以真加密驗證;`sw.js` 的解密/通知邏輯與 §6.3 通知隱私開關依 §5.5 設計(解密失敗仍顯示通用通知)。
 
@@ -111,12 +113,14 @@ CI(`.github/workflows/ci.yml`)每次 push / PR 全部跑一遍。
 wrangler.jsonc          Worker 設定(assets + D1 + R2 + cron;workers.dev 關閉)
 migrations/             0001 核心 schema(§4.2 + pairings + api_tokens)
                         0002 Phase 2(user 身分金鑰欄位 + contacts + from_user)
+                        0003 診斷(diag_runs 速率限制)
+                        0004 合併上傳(upload_intents)
 src/                    Worker(TypeScript)
   index.ts              路由器 + /api/health readiness 檢查
-  routes/               register / pairing / contacts / messages / objects / tokens / devices
+  routes/               register / pairing / contacts / messages / objects / tokens / devices / diag
   lib/webpush.ts        RFC 8291 + RFC 8292,零依賴
   fanout.ts             推送 fan-out 與 §8.3 失效處理
-  cron.ts               §10 清理
+  cron.ts               §10 清理(訊息/配對/diag 殘留)
 public/                 PWA(vanilla ES modules,無建置步驟)
   index.html            App 殼(字型非阻塞載入)
   landing.html          使用手冊 / 教學頁(/landing,一鍵安裝)
@@ -124,17 +128,19 @@ public/                 PWA(vanilla ES modules,無建置步驟)
   js/app.js             SPA:收件匣、剪貼簿 composer、配對、好友、備份、設定、安裝引導
   js/qr.js              QR 產生(vendor/lean-qr.mjs,MIT)
   js/qr-import.js       QR 照片解碼(BarcodeDetector → vendor/jsQR.js,Apache-2.0)
-  js/api.js store.js image.js   fetch 包裝 / IndexedDB / canvas 壓縮
-  sw.js                 push 解密與通知 action、share-target(含 CSRF 防護)、shell cache
+  js/diag.js            傳輸診斷(測量、結論規則、報告)
+  js/api.js store.js image.js   fetch 包裝 / IndexedDB / canvas 壓縮 + 縮圖
+  js/image-worker.js    背景執行緒圖片壓縮(module worker)
+  sw.js                 push 解密與通知 action、檔案預取、share-target(含 CSRF 防護)、shell cache
 cli/                    bentodrop-push.mjs + lib.mjs(§12.3,零依賴)
-test/                   workerd 整合測試(94)
-e2e/                    Playwright E2E(19)
+test/                   workerd 整合測試(113)
+e2e/                    Playwright E2E(23)
 scripts/                deploy(零設定部署)/ gen-vapid / gen-icons / e2e-server
 ```
 
 ## 安裝與教學
 
-- **Landing page / 使用手冊**:`/landing`(沿用 mockup 視覺,只介紹已實作的功能;「開始使用」導回 `/`)。含 Android / iOS / 桌面三平台的安裝步驟,iOS 特別強調必須「加入主畫面」才有推送(§9)。瀏覽器提供安裝提示時,hero 按鈕與安裝區的「📲 一鍵安裝」直接觸發原生安裝(`beforeinstallprompt`)。
+- **Landing page / 使用手冊**:`/landing`(沿用 mockup 視覺,只介紹已實作的功能;「開始使用」導回 `/`)。含 Android / iOS / 桌面三平台的安裝步驟,iOS 特別強調必須「加入主畫面」才有推送(§9)。瀏覽器提供安裝提示時,hero 按鈕與安裝區的「一鍵安裝」直接觸發原生安裝(`beforeinstallprompt`)。
 - **App 內安裝引導**:非 PWA 模式開啟時,開通頁與收件匣上方顯示安裝橫幅 — 支援 `beforeinstallprompt` 的環境一鍵安裝;其他(含 iOS)按「怎麼裝?」彈出對應平台的簡化步驟。橫幅可關閉(每台裝置記住);**設定頁的「安裝成 App」永遠找得到**,不受關閉影響。
 - **已安裝偵測**:透過 `getInstalledRelatedApps()`(Android/Chromium,manifest 有對應宣告)加上 standalone 開啟/`appinstalled` 事件記住的旗標,判定這台裝置已裝過 → 安裝橫幅、設定頁「安裝成 App」、landing 的安裝 CTA **全部不再顯示**;偵測到已解除安裝(API 回空)會自動恢復顯示。`beforeinstallprompt` 在已安裝的裝置上本來就不會再觸發(Chrome 行為)。
 - Google Fonts 以非阻塞方式載入(`media="print"` onload 切換):字型 CDN 慢或不可達時,App 照常啟動、以系統字型顯示。

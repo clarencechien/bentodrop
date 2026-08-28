@@ -102,18 +102,58 @@ section{padding:72px 0}
 .sec-head .num{font-family:"Space Mono",monospace;font-weight:700;font-size:12px;background:var(--nori);color:var(--box);padding:3px 8px;border-radius:4px;letter-spacing:.08em}
 .sec-note{margin:14px 0 40px;max-width:60ch;color:var(--nori-soft)}
 
-/* feature grid */
+/* speed band — the 即送 pitch, in the dark-node idiom */
+.speedband{
+  border:2px solid var(--nori);border-radius:var(--r);overflow:hidden;
+  background:var(--nori);color:var(--box);box-shadow:var(--shadow);
+  display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:2px;
+}
+.sb{padding:22px 20px;background:var(--nori);position:relative}
+.sb+.sb{border-left:2px solid rgba(230,237,234,.12)}
+.sb .k{font-family:"Space Mono",monospace;font-size:10px;letter-spacing:.14em;color:var(--gogo);text-transform:uppercase}
+.sb b{display:block;font-family:"Archivo",sans-serif;font-weight:900;font-size:clamp(30px,4vw,42px);letter-spacing:-.03em;line-height:1.05;margin-top:8px}
+.sb b em{font-style:normal;color:var(--gogo)}
+.sb p{font-size:12.5px;color:rgba(230,237,234,.72);margin-top:8px;line-height:1.55}
+.sb .measured{display:inline-block;margin-top:10px;font-family:"Space Mono",monospace;font-size:9px;letter-spacing:.08em;border:1px solid rgba(0,194,168,.5);color:var(--gogo);border-radius:3px;padding:1px 6px}
+
+/* feature grid — bento glyphs, not emoji */
 .feats{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:2px;background:rgba(23,42,38,.16);border:2px solid var(--nori);border-radius:var(--r);overflow:hidden}
 .feat{background:var(--rice);padding:20px}
-.feat .fi{font-size:22px}
-.feat b{display:block;font-family:"Archivo","Noto Sans TC",sans-serif;font-weight:800;font-size:15px;margin-top:8px}
+.feat .fhead{display:flex;align-items:center;gap:10px}
+.feat .num{font-family:"Space Mono",monospace;font-size:10px;font-weight:700;letter-spacing:.08em;color:var(--nori-soft);margin-left:auto}
+.feat b{display:block;font-family:"Archivo","Noto Sans TC",sans-serif;font-weight:800;font-size:15px;margin-top:10px}
 .feat p{font-size:13px;color:var(--nori-soft);margin-top:6px;line-height:1.6}
 .feat .tag{font-family:"Space Mono",monospace;font-size:9px;letter-spacing:.08em;border:1px solid var(--gogo);color:#045F52;background:#E2F7F3;border-radius:3px;padding:0 5px;margin-left:6px;vertical-align:2px}
+/* the glyph: a 40×30 bento box; each variant fills its compartments differently */
+.glyph{width:40px;height:30px;border:2px solid var(--nori);border-radius:6px;background:var(--rice);position:relative;overflow:hidden;flex:none}
+.glyph i{position:absolute;display:block}
+.g-zap i:nth-child(1){left:0;top:0;bottom:0;width:38%;background:var(--gogo)}
+.g-zap i:nth-child(2){right:4px;top:4px;width:6px;height:6px;border-radius:50%;background:var(--ume)}
+.g-share i:nth-child(1){left:0;right:0;bottom:0;height:34%;background:var(--tama)}
+.g-share i:nth-child(2){left:50%;top:4px;width:0;height:0;margin-left:-5px;border-left:5px solid transparent;border-right:5px solid transparent;border-bottom:8px solid var(--gogo)}
+.g-notify i:nth-child(1){left:0;right:0;top:0;height:30%;background:#F0F2EE;border-bottom:2px solid var(--nori)}
+.g-notify i:nth-child(2){right:4px;top:2px;width:5px;height:5px;border-radius:50%;background:var(--ume)}
+.g-photo i:nth-child(1){left:0;top:0;bottom:0;width:55%;background:var(--tama)}
+.g-photo i:nth-child(2){right:3px;bottom:3px;width:10px;height:8px;border-radius:2px;background:var(--gogo)}
+.g-friend i:nth-child(1){left:0;top:0;bottom:0;width:46%;background:var(--gogo)}
+.g-friend i:nth-child(2){right:0;top:0;bottom:0;width:46%;background:var(--gogo-deep)}
+.g-words i:nth-child(1){left:3px;top:3px;width:12px;height:9px;border-radius:2px;background:#EFF3F1;border:1.5px solid var(--nori-soft)}
+.g-words i:nth-child(2){right:3px;top:3px;width:12px;height:9px;border-radius:2px;background:#EFF3F1;border:1.5px solid var(--nori-soft)}
+.g-words i:nth-child(3){left:3px;bottom:3px;width:12px;height:9px;border-radius:2px;background:var(--gogo)}
+.g-words i:nth-child(4){right:3px;bottom:3px;width:12px;height:9px;border-radius:2px;background:#EFF3F1;border:1.5px solid var(--nori-soft)}
+.g-script{background:var(--nori)}
+.g-script i:nth-child(1){left:5px;top:8px;width:12px;height:2px;background:var(--gogo)}
+.g-script i:nth-child(2){left:5px;top:14px;width:18px;height:2px;background:rgba(230,237,234,.5)}
+.g-script i:nth-child(3){left:5px;top:20px;width:8px;height:2px;background:rgba(230,237,234,.5)}
+.g-expire{border-style:dashed;border-color:var(--nori-soft)}
+.g-expire i:nth-child(1){left:6px;top:50%;right:6px;height:2px;margin-top:-1px;background:var(--box-deep)}
 
 /* install cards */
 .install-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:20px}
 .icard{border:2px solid var(--nori);border-radius:var(--r);background:var(--rice);padding:22px;box-shadow:var(--shadow)}
 .icard h3{display:flex;align-items:center;gap:8px}
+.icard .plat{font-family:"Space Mono",monospace;font-size:9.5px;font-weight:700;letter-spacing:.1em;background:var(--nori);color:var(--box);padding:3px 7px;border-radius:4px;flex:none}
+.icard.ios .plat{background:var(--ume)}
 .icard ol{margin:14px 0 0 2px;list-style:none;counter-reset:step}
 .icard ol li{counter-increment:step;display:flex;gap:12px;align-items:flex-start;padding:8px 0;font-size:14px;line-height:1.55}
 .icard ol li::before{content:counter(step);flex:none;width:24px;height:24px;border-radius:50%;background:var(--nori);color:var(--box);font-family:"Space Mono",monospace;font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center;margin-top:1px}
@@ -209,7 +249,7 @@ footer p{margin-top:16px;font-size:12px;color:var(--nori-soft)}
       </div>
       <div class="hero-stats">
         <div class="stat"><b>1 個欄位</b><span>開通只問你的名字</span></div>
-        <div class="stat"><b>2 步</b><span>貼上 → 即送</span></div>
+        <div class="stat"><b>~1 秒</b><span>⚡即送到另一台震動</span></div>
         <div class="stat"><b>0 個帳號</b><span>金鑰只在你的裝置上</span></div>
       </div>
     </div>
@@ -235,6 +275,32 @@ footer p{margin-top:16px;font-size:12px;color:var(--nori-soft)}
     </div>
   </div>
 
+  <!-- 即送 = the pitch. Real numbers from the built-in 測速, not marketing. -->
+  <div class="speedband" style="margin-top:46px">
+    <div class="sb">
+      <span class="k">即送 / INSTANT</span>
+      <b><em>1</em> 鍵</b>
+      <p>開 App 那一刻,剪貼簿內容已經擺好在按鈕上。按「⚡即送」就出門,不用貼上、不用確認。</p>
+    </div>
+    <div class="sb">
+      <span class="k">文字 / TEXT</span>
+      <b>~<em>1</em> 秒</b>
+      <p>按下到另一台裝置震動:送出 0.3 秒 + 推送 0.7 秒。2 KB 以內不落地,直接塞進推送封包。</p>
+      <span class="measured">實測 · 設定頁可自己跑</span>
+    </div>
+    <div class="sb">
+      <span class="k">照片 / PHOTO</span>
+      <b><em>0</em> 等待</b>
+      <p>通知到手時,檔案已在背景抓好解好。點開通知,照片直接出現 — 沒有「下載中」。</p>
+      <span class="measured">預取 ≤5MB · 行動網路 ≤1.5MB</span>
+    </div>
+    <div class="sb">
+      <span class="k">上傳 / UPLOAD</span>
+      <b><em>2</em> 次往返</b>
+      <p>開單與收件合併成一趟,照片上傳從四次往返砍到兩次。壓縮在背景執行緒做,不卡畫面。</p>
+    </div>
+  </div>
+
   <hr class="divider">
 
   <!-- ══════════ 功能 ══════════ -->
@@ -246,21 +312,37 @@ footer p{margin-top:16px;font-size:12px;color:var(--nori-soft)}
     <p class="sec-note">下面每一項都是現在就能用的,不是路線圖。</p>
 
     <div class="feats">
-      <div class="feat"><span class="fi">📋</span><b>剪貼簿即送</b>
+      <div class="feat">
+        <div class="fhead"><span class="glyph g-zap" aria-hidden="true"><i></i><i></i></span><span class="num">01</span></div>
+        <b>剪貼簿即送</b>
         <p>授權一次後,開 App 就看到剪貼簿的反灰預覽 — 文字或圖片縮圖 — 按「⚡即送」直接出門。開始打字,按鈕自動變「送出」。</p></div>
-      <div class="feat"><span class="fi">📤</span><b>分享面板直送<span class="tag">Android</span></b>
+      <div class="feat">
+        <div class="fhead"><span class="glyph g-share" aria-hidden="true"><i></i><i></i></span><span class="num">02</span></div>
+        <b>分享面板直送<span class="tag">Android</span></b>
         <p>裝成 App 後,任何 App 按「分享」選 BentoDrop,背景自動加密送出,連畫面都不用操作。</p></div>
-      <div class="feat"><span class="fi">🔔</span><b>通知就是入口</b>
-        <p>通知直接顯示內容,附「複製」按鈕;是 https 連結就多一顆「開啟」。鎖定畫面不想被看到?每台裝置可各自關閉預覽。</p></div>
-      <div class="feat"><span class="fi">📷</span><b>照片自動瘦身</b>
-        <p>圖片先壓縮(長邊 2048、WebP)再加密,EXIF 與 GPS 位置自動剝除。要傳原檔也可以,會先警告你。</p></div>
-      <div class="feat"><span class="fi">🤝</span><b>加好友互送</b>
+      <div class="feat">
+        <div class="fhead"><span class="glyph g-notify" aria-hidden="true"><i></i><i></i></span><span class="num">03</span></div>
+        <b>通知就是入口</b>
+        <p>通知直接顯示內容,照片附縮圖,還有「複製」按鈕;是 https 連結就多一顆「開啟」。鎖定畫面不想被看到?每台裝置可各自關閉預覽。</p></div>
+      <div class="feat">
+        <div class="fhead"><span class="glyph g-photo" aria-hidden="true"><i></i><i></i></span><span class="num">04</span></div>
+        <b>照片自動瘦身</b>
+        <p>圖片先壓縮(長邊 2048、WebP)再加密,EXIF 與 GPS 位置自動剝除。對方那頭在背景先抓好,點開通知即現。</p></div>
+      <div class="feat">
+        <div class="fhead"><span class="glyph g-friend" aria-hidden="true"><i></i><i></i></span><span class="num">05</span></div>
+        <b>加好友互送</b>
         <p>掃 QR、按確認,就能和家人互送。用對方的公鑰加密,解除好友立刻擋下來訊。對方看不到你的裝置名稱。</p></div>
-      <div class="feat"><span class="fi">🔑</span><b>12 個字救回一切</b>
+      <div class="feat">
+        <div class="fhead"><span class="glyph g-words" aria-hidden="true"><i></i><i></i><i></i><i></i></span><span class="num">06</span></div>
+        <b>12 個字救回一切</b>
         <p>還原碼用 BIP39 標準 12 詞,可複製、下載、列印、產 QR;還原時拍張 QR 照片就能匯入,打錯字當場抓出來。</p></div>
-      <div class="feat"><span class="fi">🤖</span><b>腳本也能推</b>
+      <div class="feat">
+        <div class="fhead"><span class="glyph g-script" aria-hidden="true"><i></i><i></i><i></i></span><span class="num">07</span></div>
+        <b>腳本也能推</b>
         <p>NAS 備份完成、CI 建置結束 — 一行 curl 或附帶的 CLI 就能推到你的手機。token 只能發不能讀,外洩也看不到任何內容。</p></div>
-      <div class="feat"><span class="fi">🗑️</span><b>過期自動清空</b>
+      <div class="feat">
+        <div class="fhead"><span class="glyph g-expire" aria-hidden="true"><i></i></span><span class="num">08</span></div>
+        <b>過期自動清空</b>
         <p>預設 7 天自動刪除(可調 1/30 天),隨時可手動刪,所有裝置同步消失。明文模式的訊息最多只留 24 小時。</p></div>
     </div>
   </section>
@@ -277,13 +359,13 @@ footer p{margin-top:16px;font-size:12px;color:var(--nori-soft)}
 
     <!-- Shown only when the browser offers a real install prompt (manemu pattern) -->
     <p style="margin:-20px 0 36px" id="oneClickRow" hidden>
-      <button class="cta js-install" type="button" style="cursor:pointer">📲 一鍵安裝(免商店)</button>
+      <button class="cta js-install" type="button" style="cursor:pointer">一鍵安裝(免商店)</button>
       <span class="mono" style="font-size:11px;color:var(--nori-soft);margin-left:10px">按下去就裝好,不用進商店</span>
     </p>
 
     <div class="install-grid">
       <div class="icard">
-        <h3>🤖 Android(Chrome)</h3>
+        <h3><span class="plat">ANDROID</span>Android(Chrome)</h3>
         <ol>
           <li>用 Chrome 開啟 <span class="kbd">bentodrop.ai-apps.work</span></li>
           <li>畫面上會出現「安裝」提示,或按右上 <span class="kbd">⋮</span> → <span class="kbd">安裝應用程式</span></li>
@@ -292,7 +374,7 @@ footer p{margin-top:16px;font-size:12px;color:var(--nori-soft)}
       </div>
 
       <div class="icard ios">
-        <h3>🍎 iPhone / iPad(Safari)</h3>
+        <h3><span class="plat">iOS</span>iPhone / iPad(Safari)</h3>
         <ol>
           <li>用 <b>Safari</b> 開啟 <span class="kbd">bentodrop.ai-apps.work</span></li>
           <li>按底部中間的分享鈕 <span class="kbd">⎋</span>(方框加向上箭頭)</li>
@@ -303,7 +385,7 @@ footer p{margin-top:16px;font-size:12px;color:var(--nori-soft)}
       </div>
 
       <div class="icard">
-        <h3>💻 電腦(Chrome / Edge)</h3>
+        <h3><span class="plat">DESKTOP</span>電腦(Chrome / Edge)</h3>
         <ol>
           <li>開啟 <span class="kbd">bentodrop.ai-apps.work</span></li>
           <li>點網址列右側的安裝圖示(螢幕加向下箭頭),或 <span class="kbd">⋮</span> → <span class="kbd">安裝</span></li>
@@ -473,7 +555,7 @@ curl -X POST https://bentodrop.ai-apps.work/api/push \
     deferredInstall = e;
     var row = document.getElementById('oneClickRow');
     if (row) row.hidden = false;
-    document.querySelectorAll('a.js-install').forEach(function(a){ a.textContent = '📲 一鍵安裝'; });
+    document.querySelectorAll('a.js-install').forEach(function(a){ a.textContent = '一鍵安裝'; });
   });
   document.addEventListener('click', function(e){
     var t = e.target.closest('.js-install');
