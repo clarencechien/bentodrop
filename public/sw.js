@@ -80,6 +80,15 @@ self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
   if (url.origin === location.origin && url.pathname === "/share-target" && event.request.method === "POST") {
     event.respondWith((async () => {
+      // CSRF guard: a genuine share-sheet launch navigates with
+      // Sec-Fetch-Site "none" (browser/OS initiated); in-app calls are
+      // "same-origin". A cross-site page auto-submitting a form here
+      // arrives as "cross-site" — refuse it before touching the token.
+      // The header is browser-set and cannot be forged from a web page.
+      const site = event.request.headers.get("sec-fetch-site");
+      if (site && site !== "none" && site !== "same-origin") {
+        return Response.redirect("/?shared=fail", 303);
+      }
       try {
         await shareTargetSend(await event.request.formData());
         return Response.redirect("/?shared=sent", 303);

@@ -205,7 +205,7 @@ footer p{margin-top:16px;font-size:12px;color:var(--nori-soft)}
       <p class="lede hero-sub">文字、連結、照片裝進盒子,送到你自己的其他裝置,或送給家人。伺服器只負責載運,打不開盒子。沒有帳號、沒有密碼、沒有驗證信。</p>
       <div class="hero-cta">
         <a class="cta" href="/">開始使用 →</a>
-        <a class="cta ghost" href="#install">裝成 App</a>
+        <a class="cta ghost js-install" href="#install">裝成 App</a>
       </div>
       <div class="hero-stats">
         <div class="stat"><b>1 個欄位</b><span>開通只問你的名字</span></div>
@@ -274,6 +274,12 @@ footer p{margin-top:16px;font-size:12px;color:var(--nori-soft)}
       <h2>裝成 App,通知才可靠</h2>
     </div>
     <p class="sec-note">BentoDrop 是 PWA:不經過商店、沒有安裝包,從瀏覽器直接「裝」。裝了之後有推送通知、出現在分享面板(Android),體驗和原生 App 一樣。</p>
+
+    <!-- Shown only when the browser offers a real install prompt (manemu pattern) -->
+    <p style="margin:-20px 0 36px" id="oneClickRow" hidden>
+      <button class="cta js-install" type="button" style="cursor:pointer">📲 一鍵安裝(免商店)</button>
+      <span class="mono" style="font-size:11px;color:var(--nori-soft);margin-left:10px">按下去就裝好,不用進商店</span>
+    </p>
 
     <div class="install-grid">
       <div class="icard">
@@ -454,6 +460,34 @@ curl -X POST https://bentodrop.ai-apps.work/api/push \
     setTimeout(function(){
       if (!bento.classList.contains('is-open')) bento.click();
     }, 900);
+  }
+
+  // One-tap PWA install: capture the browser's install prompt and route all
+  // .js-install buttons to it. Without the event (e.g. iOS, or already
+  // installed) the hero button keeps its #install anchor to the manual steps.
+  var deferredInstall = null;
+  var standalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+  window.addEventListener('beforeinstallprompt', function(e){
+    e.preventDefault();
+    if (standalone) return;
+    deferredInstall = e;
+    var row = document.getElementById('oneClickRow');
+    if (row) row.hidden = false;
+    document.querySelectorAll('a.js-install').forEach(function(a){ a.textContent = '📲 一鍵安裝'; });
+  });
+  document.addEventListener('click', function(e){
+    var t = e.target.closest('.js-install');
+    if (!t || !deferredInstall) return;
+    e.preventDefault();
+    deferredInstall.prompt();
+    deferredInstall.userChoice.finally(function(){
+      deferredInstall = null;
+      var row = document.getElementById('oneClickRow');
+      if (row) row.hidden = true;
+    });
+  });
+  if (standalone) {
+    document.querySelectorAll('.js-install').forEach(function(el){ el.style.display = 'none'; });
   }
 
   var chute = document.getElementById('chute');

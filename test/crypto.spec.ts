@@ -33,10 +33,23 @@ describe("BIP39 recovery code (§6.2)", () => {
   });
 
   it("detects a wrong word via checksum (§6.2: catch typos immediately)", async () => {
-    const words = await C.entropyToMnemonic(C.generateEntropy());
-    const tampered = [...words];
-    tampered[3] = tampered[3] === "abandon" ? "zoo" : "abandon";
-    await expect(C.mnemonicToEntropy(tampered)).rejects.toThrow();
+    // Deterministic: a 12-word checksum is only 4 bits, so a RANDOM tamper
+    // passes by luck 1/16 of the time. Use fixed entropy and substitutions
+    // verified against the reference implementation: for this mnemonic,
+    // word 4 → "abandon"/"zebra" break the checksum ("zoo" happens to pass).
+    const entropy = new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
+    const words = await C.entropyToMnemonic(entropy);
+    expect(words.join(" ")).toBe("absurd avoid scissors anxiety gather lottery category door army half long camera");
+    for (const bad of ["abandon", "zebra"]) {
+      const tampered = [...words];
+      tampered[3] = bad;
+      await expect(C.mnemonicToEntropy(tampered)).rejects.toThrow(/檢查碼/);
+    }
+    // And the 1/16 lucky collision decodes to DIFFERENT entropy — it can
+    // never silently restore the wrong account as the right one.
+    const lucky = [...words];
+    lucky[3] = "zoo";
+    expect(await C.mnemonicToEntropy(lucky)).not.toEqual(entropy);
   });
 
   it("rejects words outside the wordlist", async () => {
