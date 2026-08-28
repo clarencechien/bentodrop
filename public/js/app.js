@@ -288,6 +288,7 @@ function renderOnboarding(next) {
         <button class="btn ghost inline" id="obJoin" type="button">已有其他裝置?配對加入</button>
         <button class="btn ghost inline" id="obRestore" type="button">用還原碼還原</button>
       </div>
+      <p class="btn-note" style="margin-top:10px">在這台的另一個瀏覽器或 App 開通過?選「配對加入」— 重新開通會變成另一個帳號</p>
     </div>`));
   document.getElementById("obForm").onsubmit = async (e) => {
     e.preventDefault();
@@ -1094,8 +1095,10 @@ function renderPairJoin(pairIdFromUrl) {
   root.querySelector("#jnBack").onclick = () => location.assign("/");
   root.querySelector("#jnLabel").value = guessLabel();
   // Scanned via QR? The code rides in the fragment (#c=123456) — pre-fill it.
+  // Only when we actually arrived on a /p/ link: reached from elsewhere
+  // (e.g. a friend-invite page) the fragment holds a DIFFERENT code.
   const fragCode = /[#&]c=(\d{6})/.exec(location.hash)?.[1];
-  if (fragCode) root.querySelector("#jnCode").value = fragCode;
+  if (pairIdFromUrl && fragCode) root.querySelector("#jnCode").value = fragCode;
 
   root.querySelector("#joinForm").onsubmit = async (e) => {
     e.preventDefault();
@@ -1133,8 +1136,17 @@ function renderPairJoin(pairIdFromUrl) {
         state.deviceId = res.deviceId;
         state.label = label;
         history.replaceState(null, "", "/");
-        toast("配對完成");
-        renderInbox();
+        // A friend invite opened before this device had an account?
+        // Pairing was the right answer — now finish what they came for,
+        // bound to the account they just joined instead of a fresh one.
+        const pending = await pendingInvite();
+        if (pending) {
+          toast("配對完成,繼續加好友");
+          resumeInvite(pending);
+        } else {
+          toast("配對完成");
+          renderInbox();
+        }
         ensurePush({ interactive: true });
       };
       finish();
@@ -1143,6 +1155,20 @@ function renderPairJoin(pairIdFromUrl) {
       btn.disabled = false;
     }
   };
+}
+
+// ── pending friend invite (survives onboarding / pairing) ────────────
+// Invites live 30 minutes server-side; treat the stash as stale a bit
+// earlier so we never resume into a guaranteed-expired code.
+async function pendingInvite() {
+  const p = await kvGet(K.PENDING_INVITE).catch(() => null);
+  if (!p?.pairId || Date.now() - p.ts > 25 * 60 * 1000) return null;
+  return p;
+}
+
+function resumeInvite(p) {
+  history.replaceState(null, "", `/f/${p.pairId}`);
+  renderFriendJoin(p.pairId, p.code);
 }
 
 // ── friends (§11 / §6.7): same URL+code mechanism, 30-minute TTL ─────
@@ -1224,7 +1250,7 @@ async function renderFriendInvite() {
   };
 }
 
-function renderFriendJoin(pairId) {
+function renderFriendJoin(pairId, presetCode = null) {
   setNav(true);
   const root = el(`
     <div class="compartment" style="max-width:460px;margin:30px auto">
@@ -1240,9 +1266,13 @@ function renderFriendJoin(pairId) {
     </div>`);
   $app.replaceChildren(root);
   kvGet(K.USER_NAME).then((n) => { root.querySelector("#fjName").value = n ?? ""; });
-  const fragCode = /[#&]c=(\d{6})/.exec(location.hash)?.[1];
-  if (fragCode) root.querySelector("#fjCode").value = fragCode;
-  root.querySelector("#fjBack").onclick = () => { history.replaceState(null, "", "/"); renderInbox(); };
+  const code = presetCode ?? /[#&]c=(\d{6})/.exec(location.hash)?.[1];
+  if (code) root.querySelector("#fjCode").value = code;
+  root.querySelector("#fjBack").onclick = () => {
+    kvDelete(K.PENDING_INVITE).catch(() => {}); // abandoned on purpose
+    history.replaceState(null, "", "/");
+    renderInbox();
+  };
 
   root.querySelector("#fjForm").onsubmit = async (e) => {
     e.preventDefault();
@@ -1258,6 +1288,7 @@ function renderFriendJoin(pairId) {
         const contacts = await refreshContacts();
         if (contacts.length > before) {
           clearInterval(poll);
+          kvDelete(K.PENDING_INVITE).catch(() => {});
           toast(`已成為好友:${contacts[contacts.length - 1].label}`);
           history.replaceState(null, "", "/");
           renderInbox();
@@ -1831,11 +1862,26 @@ async function boot() {
     // Both sides of a friend link are real users — someone without an
     // account onboards first, then lands back in the claim flow (§6.7).
     if (loggedIn) renderFriendJoin(friendMatch[1]);
-    else renderOnboarding(() => renderFriendJoin(friendMatch[1]));
+    else {
+      // Remember the invite so it survives whatever the user does next in
+      // THIS storage: onboarding, or — the right move when they already
+      // have an account elsewhere — a pairing join. A second onboarding
+      // would mint a second identity and bind the friendship to it.
+      const code = /[#&]c=(\d{6})/.exec(location.hash)?.[1] ?? null;
+      kvSet(K.PENDING_INVITE, { pairId: friendMatch[1], code, ts: Date.now() }).catch(() => {});
+      renderOnboarding(() => renderFriendJoin(friendMatch[1]));
+    }
     return;
   }
+  const pending = await pendingInvite();
   if (!loggedIn) {
-    renderOnboarding();
+    // A pending invite survives a closed tab: resume it after onboarding.
+    renderOnboarding(pending ? () => resumeInvite(pending) : undefined);
+    return;
+  }
+  if (pending) {
+    // Account exists (onboarded or paired since the invite) — pick it up.
+    resumeInvite(pending);
     return;
   }
   renderInbox();
