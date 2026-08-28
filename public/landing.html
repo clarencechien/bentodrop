@@ -486,8 +486,17 @@ curl -X POST https://bentodrop.ai-apps.work/api/push \
       if (row) row.hidden = true;
     });
   });
-  if (standalone) {
+  function hideInstallUi(){
     document.querySelectorAll('.js-install').forEach(function(el){ el.style.display = 'none'; });
+    var row = document.getElementById('oneClickRow');
+    if (row) row.hidden = true;
+  }
+  if (standalone) hideInstallUi();
+  // Already installed but opened in a browser tab → the install CTAs are noise.
+  else if (navigator.getInstalledRelatedApps) {
+    navigator.getInstalledRelatedApps().then(function(apps){
+      if (apps.length > 0) hideInstallUi();
+    }).catch(function(){});
   }
 
   var chute = document.getElementById('chute');

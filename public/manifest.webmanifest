@@ -8,6 +8,10 @@
   "background_color": "#E6EDEA",
   "theme_color": "#E6EDEA",
   "lang": "zh-Hant-TW",
+  "related_applications": [
+    { "platform": "webapp", "url": "https://bentodrop.ai-apps.work/manifest.webmanifest" }
+  ],
+  "prefer_related_applications": false,
   "share_target": {
     "action": "/share-target",
     "method": "POST",

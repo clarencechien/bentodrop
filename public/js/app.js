@@ -150,6 +150,34 @@ function isStandalone() {
   return matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
 }
 
+window.addEventListener("appinstalled", () => kvSet(K.APP_INSTALLED, Date.now()).catch(() => {}));
+
+/**
+ * Installed on THIS device, even when currently opened in a browser tab?
+ * getInstalledRelatedApps (Android/Chromium) is authoritative when available;
+ * otherwise fall back to a flag remembered from standalone opens or the
+ * appinstalled event (covers desktop, where the API may be unavailable).
+ */
+async function isInstalled() {
+  if (isStandalone()) {
+    kvSet(K.APP_INSTALLED, Date.now()).catch(() => {});
+    return true;
+  }
+  if (navigator.getInstalledRelatedApps) {
+    try {
+      const apps = await navigator.getInstalledRelatedApps();
+      if (apps.length > 0) {
+        kvSet(K.APP_INSTALLED, Date.now()).catch(() => {});
+        return true;
+      }
+      // Authoritative "not installed" — clear a stale flag (app uninstalled).
+      kvDelete(K.APP_INSTALLED).catch(() => {});
+      return false;
+    } catch { /* fall through to the flag */ }
+  }
+  return Boolean(await kvGet(K.APP_INSTALLED));
+}
+
 function platformInstallSteps() {
   const ua = navigator.userAgent;
   if (/iPhone|iPad/.test(ua)) {
@@ -197,9 +225,9 @@ function showInstallGuide() {
   modal(box);
 }
 
-/** Banner above the inbox (only when NOT already running as an installed app). */
+/** Banner above the inbox — never shown once the app is installed on this device. */
 async function installBanner() {
-  if (isStandalone()) return null;
+  if (await isInstalled()) return null;
   if (await kvGet(K.INSTALL_DISMISSED)) return null;
   const banner = el(`
     <div class="install-banner" id="installBanner">
@@ -1236,6 +1264,7 @@ async function renderSettings() {
   }
   const notifyPreview = (await kvGet(K.NOTIFY_PREVIEW)) !== false; // default on
   const backedUp = await kvGet(K.BACKED_UP);
+  const installed = await isInstalled();
   const root = el(`
     <div>
       <h2>設定</h2>
@@ -1247,7 +1276,7 @@ async function renderSettings() {
           <button class="btn inline" id="stPair" type="button">加一台裝置</button>
           <button class="btn ghost inline" id="stTestPush" type="button">測試推送</button>
           <button class="btn ghost inline" id="stEnablePush" type="button">啟用本機通知</button>
-          ${isStandalone() ? "" : '<button class="btn ghost inline" id="stInstall" type="button">安裝成 App</button>'}
+          ${installed ? "" : '<button class="btn ghost inline" id="stInstall" type="button">安裝成 App</button>'}
         </div>
         <div id="pushResult"></div>
       </div>
