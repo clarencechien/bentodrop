@@ -280,6 +280,28 @@ test("recovery QR: export from backup, import a photo on restore (§6.5.1)", asy
   await b.context.close();
 });
 
+test("notification 複製 action: copy-msg writes the clipboard and opens the message", async ({ browser, baseURL }) => {
+  const { context, page } = await newDeviceContext(browser, baseURL!, ["clipboard-read", "clipboard-write"]);
+  await onboard(page, "copier");
+  const secret = "通知複製測試內容";
+  await sendText(page, secret);
+  await refreshInbox(page);
+  const msgId = await page.evaluate(async () => {
+    const { api } = await import("/js/api.js");
+    return (await api.messages()).messages[0].msgId as string;
+  });
+
+  // What the SW posts when the notification's 複製 button is tapped.
+  await page.evaluate(({ id, text }) => {
+    navigator.serviceWorker.dispatchEvent(new MessageEvent("message", { data: { t: "copy-msg", msgId: id, text } }));
+  }, { id: msgId, text: secret });
+
+  await expect(page.locator(".modal .detail-body")).toHaveText(secret);
+  await expect(page.locator("#toast")).toContainText(/已複製|複製按鈕/);
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(secret);
+  await context.close();
+});
+
 test("inbox first paint comes from cache when the server is unreachable", async ({ browser, baseURL }) => {
   const { context, page } = await newDeviceContext(browser, baseURL!);
   await onboard(page, "cacher");
