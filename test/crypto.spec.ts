@@ -161,3 +161,20 @@ describe("text kind detection (§7.2.1: https:// whitelist)", () => {
     expect(C.detectTextKind("買牛奶")).toEqual({ kind: "text" });
   });
 });
+
+describe("androidChromeIntent (full-Chrome open from an installed PWA)", () => {
+  it("wraps an https URL in a Chrome intent with the plain URL as fallback", () => {
+    const u = "https://example.com/a?b=c&d=e";
+    expect(C.androidChromeIntent(u)).toBe(
+      `intent://example.com/a?b=c&d=e#Intent;scheme=https;package=com.android.chrome;S.browser_fallback_url=${encodeURIComponent(u)};end`,
+    );
+  });
+  it("refuses non-https URLs — the whitelist stays intact", () => {
+    expect(C.androidChromeIntent("http://example.com")).toBeNull();
+    expect(C.androidChromeIntent("javascript:alert(1)")).toBeNull();
+    expect(C.androidChromeIntent("intent://evil#Intent;end")).toBeNull();
+  });
+  it("keeps URLs with fragments in plain form — '#' would truncate the intent", () => {
+    expect(C.androidChromeIntent("https://example.com/page#section")).toBeNull();
+  });
+});

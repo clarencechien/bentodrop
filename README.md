@@ -72,7 +72,7 @@ npm run dev        # wrangler dev(本機 D1/R2);首次先跑:
 
 ```bash
 npm run typecheck   # tsc
-npm test            # 114 項整合/單元測試(真 workerd + 真 D1/R2 模擬)
+npm test            # 117 項整合/單元測試(真 workerd + 真 D1/R2 模擬)
 npm run test:e2e    # 25 項 Playwright E2E(真瀏覽器 + wrangler dev)
 npm run test:all    # 以上全部
 ```
@@ -83,7 +83,7 @@ npm run test:all    # 以上全部
 
 | 檔案 | 涵蓋 |
 |---|---|
-| `crypto.spec.ts` | client 加密:BIP39(與 @scure/bip39 參考實作交叉比對)、checksum 抓錯字、HKDF 導鍵、envelope 往返、每則新 CEK、meta 加密、配對 ECDH 包裹、`https://` 白名單偵測 |
+| `crypto.spec.ts` | client 加密:BIP39(與 @scure/bip39 參考實作交叉比對)、checksum 抓錯字、HKDF 導鍵、envelope 往返、每則新 CEK、meta 加密、配對 ECDH 包裹、`https://` 白名單偵測、Android intent:// 產生(https-only、fragment 排除) |
 | `webpush.spec.ts` | RFC 8291 aes128gcm 加密往返、header 格式、4KB 預算;RFC 8292 VAPID JWT 簽章驗證 |
 | `api.spec.ts` | 註冊/認證、文字路徑全鏈路(加密→送出→攔截推送→解 transport→解 envelope)、發送端排除、收件匣已讀保留、跨 user 隔離、檔案路徑全鏈路(§4.3 大小驗證/物件缺失/謊報大小刪物件/簽名竄改/跨 user key)、410 立即刪訂閱、連續失敗 5 次刪除、測試推送、保留期設定、推送端點白名單(含子網域偽裝與 `PUSH_ENDPOINT_ALLOW` 逃生口) |
 | `pairing.spec.ts` | §6.6 三條護欄各自對抗性測試:錯 3 次作廢(對的碼也救不回)、TTL 過期、單次使用(finish 燒毀)、每小時 5 次;code 只存 hash、wrapped blob 交付後清除、未確認前拿不到秘密 |
@@ -133,7 +133,7 @@ public/                 PWA(vanilla ES modules,無建置步驟)
   js/image-worker.js    背景執行緒圖片壓縮(module worker)
   sw.js                 push 解密與通知 action、檔案預取、share-target(含 CSRF 防護)、shell cache
 cli/                    bentodrop-push.mjs + lib.mjs(§12.3,零依賴)
-test/                   workerd 整合測試(114)
+test/                   workerd 整合測試(117)
 e2e/                    Playwright E2E(25)
 scripts/                deploy(零設定部署)/ gen-vapid / gen-icons / e2e-server
 ```

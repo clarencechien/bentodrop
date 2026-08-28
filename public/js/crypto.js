@@ -342,3 +342,15 @@ export function detectTextKind(text) {
   if (urls.length) return { kind: "text-with-urls", urls };
   return { kind: "text" };
 }
+
+/**
+ * Android only: an intent:// form of `url` that opens in FULL Chrome instead
+ * of the Custom-Tab overlay an installed PWA gets for out-of-scope links.
+ * Chrome missing → Android follows browser_fallback_url (default browser).
+ * Returns null for non-https URLs and for URLs carrying a fragment — the
+ * '#' would truncate the intent, so those keep their plain https form.
+ */
+export function androidChromeIntent(url) {
+  if (!/^https:\/\//.test(url) || url.includes("#")) return null;
+  return `intent://${url.slice("https://".length)}#Intent;scheme=https;package=com.android.chrome;S.browser_fallback_url=${encodeURIComponent(url)};end`;
+}
