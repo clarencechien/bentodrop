@@ -227,6 +227,15 @@ node cli/bentodrop-push.mjs --plain "磁碟 85%"  # 明文模式(token 需開啟
 - in-app 相機即時掃描(現為原生相機掃 QR + 照片匯入)
 - iOS 實機驗證(§9 全部項目)
 
+## 資安掃描紀錄
+
+兩輪由 Claude Code `security-review` 對整個 branch diff 的掃描(找到的每個候選都經獨立誤報過濾):
+
+- **第一輪(2026-08-28,Phase 2 完成後)**:發現並修復 share-target CSRF(上方 `Sec-Fetch-Site` 防護);同輪驗證 SQL 參數化、逐路由授權、HMAC 簽名 URL、XSS 轉義與加密衛生(IV/CEK 新鮮度、無偏隨機、timing-safe 比對)無問題。
+- **第二輪(2026-08-28,診斷 + 效能優化上線後)**:針對新增攻擊面 — `/api/diag/*`、合併上傳 intent 流程(含 HMAC 分隔符注入的具體分析)、SW 預取與通知 action、`copy-msg` handler — **零發現**。重點驗證:intent 定案時重查好友關係且失敗即刪物件、diag 刪除鎖在 `diag/{userId}/` 前綴、通知「開啟」雙重 `https://` 把關、預取走同一套下載授權。
+
+`/api/subscribe` 接受任意 https push endpoint 屬 Web Push 標準行為,不列為弱點。
+
 ## 已知限制
 
 - iOS 為 experimental(§9):需手動加入主畫面,未在實機驗證。
