@@ -99,10 +99,20 @@ async function saveIdentity({ entropy, userName, userId, deviceId, deviceToken, 
   navigator.storage?.persist?.().catch(() => {}); // §6.8
 }
 
+// iPadOS 13+ masquerades as desktop Safari ("Macintosh") by default — the
+// touch-point count is what gives the iPad away.
+function isIpad() {
+  return /iPad/.test(navigator.userAgent)
+    || (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
+}
+function isIosLike() {
+  return /iPhone/.test(navigator.userAgent) || isIpad();
+}
+
 function guessLabel() {
   const ua = navigator.userAgent;
   if (/iPhone/.test(ua)) return "iPhone";
-  if (/iPad/.test(ua)) return "iPad";
+  if (isIpad()) return "iPad";
   if (/Android/.test(ua)) return "Android";
   if (/CrOS/.test(ua)) return "Chromebook";
   if (/Macintosh/.test(ua)) return "Mac";
@@ -181,16 +191,16 @@ async function isInstalled() {
 
 function platformInstallSteps() {
   const ua = navigator.userAgent;
-  if (/iPhone|iPad/.test(ua)) {
+  if (isIosLike()) {
     return {
       title: "加入 iPhone / iPad 主畫面",
       steps: [
         "用 Safari 開啟這個網站",
-        "按底部中間的「分享」鈕(方框加向上箭頭)",
+        isIpad() ? "按網址列旁的「分享」鈕(方框加向上箭頭)" : "按底部中間的「分享」鈕(方框加向上箭頭)",
         "往下捲,點「加入主畫面」→「加入」",
         "之後一律從主畫面圖示開啟,通知才收得到",
       ],
-      note: "iOS 一定要加入主畫面才有推送通知,在 Safari 分頁裡開是收不到的。",
+      note: "iOS 沒有「一鍵安裝」— Apple 只開放手動加入主畫面。加入後才有推送通知,在 Safari 分頁裡開是收不到的。",
     };
   }
   if (/Android/.test(ua)) {
@@ -235,9 +245,9 @@ async function installBanner() {
       <i class="ib-ico"></i>
       <div class="ib-text">
         <b>把 BentoDrop 裝成 App</b>
-        <span>通知更可靠${/Android/.test(navigator.userAgent) ? ",分享面板也能直接選它" : ""}</span>
+        <span>${isIosLike() ? "iOS 要手動「加入主畫面」(Apple 限制,沒有一鍵安裝)" : `通知更可靠${/Android/.test(navigator.userAgent) ? ",分享面板也能直接選它" : ""}`}</span>
       </div>
-      <button class="btn inline" id="installBtn" type="button">${deferredInstallPrompt ? "安裝" : "怎麼裝?"}</button>
+      <button class="btn inline" id="installBtn" type="button">${deferredInstallPrompt ? "安裝" : isIosLike() ? "怎麼加?" : "怎麼裝?"}</button>
       <button class="ib-close" type="button" aria-label="關閉安裝提示">×</button>
     </div>`);
   banner.querySelector("#installBtn").onclick = async () => {

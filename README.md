@@ -73,7 +73,7 @@ npm run dev        # wrangler dev(本機 D1/R2);首次先跑:
 ```bash
 npm run typecheck   # tsc
 npm test            # 114 項整合/單元測試(真 workerd + 真 D1/R2 模擬)
-npm run test:e2e    # 24 項 Playwright E2E(真瀏覽器 + wrangler dev)
+npm run test:e2e    # 25 項 Playwright E2E(真瀏覽器 + wrangler dev)
 npm run test:all    # 以上全部
 ```
 
@@ -99,7 +99,7 @@ npm run test:all    # 以上全部
 
 真 Chromium 開兩個獨立瀏覽器 context 當兩台裝置,跑在 `wrangler dev` 上(`scripts/e2e-server.sh` 自動產生 `.dev.vars`、套本機 migrations、每次重置本機狀態):
 
-onboarding 單欄位開通與 IndexedDB 持久化、送文字給自己(加密→拉取→解密→複製 UI)、`https://` 才有「開啟連結」且永不自動跳轉、`javascript:` 當純文字、全域刪除、檔案加密上傳/下載解密(檔名解密顯示,走合併上傳流程)、**完整雙裝置配對流程**(QR 連結+配對碼→別名→舊裝置確認→K_master 移轉→跨裝置解密→備份提示)、**加好友流程**(兩個瀏覽器 context 當兩個 user:邀請→輸碼→確認→ecdh 跨 user 收發)、**邀請先於開通**(3 個 context:沒帳號的瀏覽器開邀請→選「配對加入」併入既有帳號→邀請自動續接,全程單一帳號;並驗證邀請碼不會漏進配對表單)、剪貼簿 composer(文字/圖片預覽、即送/送出切換、點預覽編輯)、**share-target**(對真 SW 發文字/圖片/空分享)、通知「複製」action 的 app 端處理(SW `copy-msg` 訊息→解密→複製)、**預取快取**(檔案通知到手即背景抓好:點開即現;快取未命中則縮圖預覽+下載按鈕)、收件匣離線首繪(API 掛掉仍先畫上次快取)、備份抽 3 詞驗證、還原碼還原(含 checksum 抓錯 + QR 照片匯入)、裝置改名、landing 頁與安裝橫幅、設定頁(保留期、API token 建立/未加密標示/實際推送/撤銷、撤銷後從列表消失)、傳輸診斷完整跑一輪(上傳=刪除、報告產出)、Service Worker 註冊與 manifest 可安裝。
+onboarding 單欄位開通與 IndexedDB 持久化、送文字給自己(加密→拉取→解密→複製 UI)、`https://` 才有「開啟連結」且永不自動跳轉、`javascript:` 當純文字、全域刪除、檔案加密上傳/下載解密(檔名解密顯示,走合併上傳流程)、**完整雙裝置配對流程**(QR 連結+配對碼→別名→舊裝置確認→K_master 移轉→跨裝置解密→備份提示)、**加好友流程**(兩個瀏覽器 context 當兩個 user:邀請→輸碼→確認→ecdh 跨 user 收發)、**邀請先於開通**(3 個 context:沒帳號的瀏覽器開邀請→選「配對加入」併入既有帳號→邀請自動續接,全程單一帳號;並驗證邀請碼不會漏進配對表單)、剪貼簿 composer(文字/圖片預覽、即送/送出切換、點預覽編輯)、**share-target**(對真 SW 發文字/圖片/空分享)、通知「複製」action 的 app 端處理(SW `copy-msg` 訊息→解密→複製)、**預取快取**(檔案通知到手即背景抓好:點開即現;快取未命中則縮圖預覽+下載按鈕)、收件匣離線首繪(API 掛掉仍先畫上次快取)、備份抽 3 詞驗證、還原碼還原(含 checksum 抓錯 + QR 照片匯入)、裝置改名、landing 頁與安裝橫幅(含 iOS UA:說明 Apple 限制、引導加入主畫面)、設定頁(保留期、API token 建立/未加密標示/實際推送/撤銷、撤銷後從列表消失)、傳輸診斷完整跑一輪(上傳=刪除、報告產出)、Service Worker 註冊與 manifest 可安裝。
 
 Web Push 本身(瀏覽器端訂閱與通知顯示)無法在 headless 環境完整重現,推送管線改由整合測試以真加密驗證;`sw.js` 的解密/通知邏輯與 §6.3 通知隱私開關依 §5.5 設計(解密失敗仍顯示通用通知)。
 
@@ -134,7 +134,7 @@ public/                 PWA(vanilla ES modules,無建置步驟)
   sw.js                 push 解密與通知 action、檔案預取、share-target(含 CSRF 防護)、shell cache
 cli/                    bentodrop-push.mjs + lib.mjs(§12.3,零依賴)
 test/                   workerd 整合測試(114)
-e2e/                    Playwright E2E(24)
+e2e/                    Playwright E2E(25)
 scripts/                deploy(零設定部署)/ gen-vapid / gen-icons / e2e-server
 ```
 

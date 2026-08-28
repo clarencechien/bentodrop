@@ -657,6 +657,26 @@ test("install banner: shows in a browser tab, opens platform steps, dismiss pers
   await context.close();
 });
 
+test("install banner on iOS: explains the no-one-tap limitation, guide shows 加入主畫面", async ({ browser, baseURL }) => {
+  // iOS Safari never fires beforeinstallprompt — the banner must say WHY
+  // there is no install button and route straight to the share-sheet steps.
+  const context = await browser.newContext({
+    baseURL,
+    permissions: ["notifications"],
+    userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1",
+  });
+  const page = await context.newPage();
+  await page.goto("/");
+  const banner = page.locator("#installBanner");
+  await expect(banner).toBeVisible();
+  await expect(banner).toContainText("Apple 限制");
+  await banner.getByRole("button", { name: "怎麼加?" }).click();
+  await expect(page.locator(".modal")).toContainText("加入 iPhone / iPad 主畫面");
+  await expect(page.locator(".modal")).toContainText("加入主畫面");
+  await expect(page.locator(".modal")).toContainText("沒有「一鍵安裝」");
+  await context.close();
+});
+
 test("service worker registers and the manifest is installable", async ({ browser, baseURL }) => {
   const { context, page } = await newDeviceContext(browser, baseURL!);
   await onboard(page, "sw-user");
