@@ -72,8 +72,8 @@ npm run dev        # wrangler dev(本機 D1/R2);首次先跑:
 
 ```bash
 npm run typecheck   # tsc
-npm test            # 75 項整合/單元測試(真 workerd + 真 D1/R2 模擬)
-npm run test:e2e    # 11 項 Playwright E2E(真瀏覽器 + wrangler dev)
+npm test            # 94 項整合/單元測試(真 workerd + 真 D1/R2 模擬)
+npm run test:e2e    # 19 項 Playwright E2E(真瀏覽器 + wrangler dev)
 npm run test:all    # 以上全部
 ```
 
@@ -97,7 +97,7 @@ npm run test:all    # 以上全部
 
 真 Chromium 開兩個獨立瀏覽器 context 當兩台裝置,跑在 `wrangler dev` 上(`scripts/e2e-server.sh` 自動產生 `.dev.vars`、套本機 migrations、每次重置本機狀態):
 
-onboarding 單欄位開通與 IndexedDB 持久化、送文字給自己(加密→拉取→解密→複製 UI)、`https://` 才有「開啟連結」且永不自動跳轉、`javascript:` 當純文字、全域刪除、檔案加密上傳/下載解密(檔名解密顯示)、**完整雙裝置配對流程**(URL+配對碼→舊裝置確認→K_master 移轉→跨裝置解密→備份提示)、備份抽 3 詞驗證、還原碼還原(含 checksum 抓錯)、設定頁(保留期、API token 建立/未加密標示/實際推送/撤銷)、Service Worker 註冊與 manifest 可安裝。
+onboarding 單欄位開通與 IndexedDB 持久化、送文字給自己(加密→拉取→解密→複製 UI)、`https://` 才有「開啟連結」且永不自動跳轉、`javascript:` 當純文字、全域刪除、檔案加密上傳/下載解密(檔名解密顯示)、**完整雙裝置配對流程**(QR 連結+配對碼→別名→舊裝置確認→K_master 移轉→跨裝置解密→備份提示)、**加好友流程**(兩個瀏覽器 context 當兩個 user:邀請→輸碼→確認→ecdh 跨 user 收發)、剪貼簿 composer(文字/圖片預覽、即送/送出切換、點預覽編輯)、**share-target**(對真 SW 發文字/圖片/空分享)、備份抽 3 詞驗證、還原碼還原(含 checksum 抓錯 + QR 照片匯入)、裝置改名、landing 頁與安裝橫幅、設定頁(保留期、API token 建立/未加密標示/實際推送/撤銷)、Service Worker 註冊與 manifest 可安裝。
 
 Web Push 本身(瀏覽器端訂閱與通知顯示)無法在 headless 環境完整重現,推送管線改由整合測試以真加密驗證;`sw.js` 的解密/通知邏輯與 §6.3 通知隱私開關依 §5.5 設計(解密失敗仍顯示通用通知)。
 
@@ -108,28 +108,35 @@ CI(`.github/workflows/ci.yml`)每次 push / PR 全部跑一遍。
 ## 專案結構
 
 ```
-wrangler.jsonc          Worker 設定(assets + D1 + R2 + cron)
-migrations/             D1 schema(§4.2 + pairings + api_tokens)
+wrangler.jsonc          Worker 設定(assets + D1 + R2 + cron;workers.dev 關閉)
+migrations/             0001 核心 schema(§4.2 + pairings + api_tokens)
+                        0002 Phase 2(user 身分金鑰欄位 + contacts + from_user)
 src/                    Worker(TypeScript)
-  index.ts              路由器
-  routes/               register / pairing / messages / objects / tokens / devices
+  index.ts              路由器 + /api/health readiness 檢查
+  routes/               register / pairing / contacts / messages / objects / tokens / devices
   lib/webpush.ts        RFC 8291 + RFC 8292,零依賴
   fanout.ts             推送 fan-out 與 §8.3 失效處理
   cron.ts               §10 清理
 public/                 PWA(vanilla ES modules,無建置步驟)
-  js/crypto.js          client 加密(BIP39 / HKDF / envelope / ECDH 配對)
-  js/qr.js              配對 QR(vendor/lean-qr.mjs,MIT;測試以 jsQR 解碼驗證)
-  js/app.js             SPA:收件匣、送出、配對、備份、設定
-  sw.js                 push 解密顯示通知(§5.5/§6.3/§7.3)、shell cache
-test/                   workerd 整合測試(75)
-e2e/                    Playwright E2E(11)
-scripts/                setup / gen-vapid / gen-icons / e2e-server
+  index.html            App 殼(字型非阻塞載入)
+  landing.html          使用手冊 / 教學頁(/landing,一鍵安裝)
+  js/crypto.js          client 加密(BIP39 / HKDF / envelope / ECDH 配對與 ecdh-p256)
+  js/app.js             SPA:收件匣、剪貼簿 composer、配對、好友、備份、設定、安裝引導
+  js/qr.js              QR 產生(vendor/lean-qr.mjs,MIT)
+  js/qr-import.js       QR 照片解碼(BarcodeDetector → vendor/jsQR.js,Apache-2.0)
+  js/api.js store.js image.js   fetch 包裝 / IndexedDB / canvas 壓縮
+  sw.js                 push 解密與通知 action、share-target(含 CSRF 防護)、shell cache
+cli/                    bentodrop-push.mjs + lib.mjs(§12.3,零依賴)
+test/                   workerd 整合測試(94)
+e2e/                    Playwright E2E(19)
+scripts/                deploy(零設定部署)/ gen-vapid / gen-icons / e2e-server
 ```
 
 ## 安裝與教學
 
-- **Landing page / 使用手冊**:`/landing`(沿用 mockup 視覺,只介紹已實作的功能;「開始使用」導回 `/`)。含 Android / iOS / 桌面三平台的安裝步驟,iOS 特別強調必須「加入主畫面」才有推送(§9)。
-- **App 內安裝引導**:非 PWA 模式開啟時,收件匣上方顯示安裝橫幅 — 支援 `beforeinstallprompt` 的環境一鍵安裝;其他(含 iOS)按「怎麼裝?」彈出對應平台的簡化步驟。可關閉,每台裝置記住。
+- **Landing page / 使用手冊**:`/landing`(沿用 mockup 視覺,只介紹已實作的功能;「開始使用」導回 `/`)。含 Android / iOS / 桌面三平台的安裝步驟,iOS 特別強調必須「加入主畫面」才有推送(§9)。瀏覽器提供安裝提示時,hero 按鈕與安裝區的「📲 一鍵安裝」直接觸發原生安裝(`beforeinstallprompt`)。
+- **App 內安裝引導**:非 PWA 模式開啟時,開通頁與收件匣上方顯示安裝橫幅 — 支援 `beforeinstallprompt` 的環境一鍵安裝;其他(含 iOS)按「怎麼裝?」彈出對應平台的簡化步驟。橫幅可關閉(每台裝置記住);**設定頁的「安裝成 App」永遠找得到**,不受關閉影響。
+- 注意:`beforeinstallprompt` 在**已安裝過**的裝置上不會再觸發(Chrome 行為)— 此時一鍵安裝按鈕不出現是正常的,從主畫面/啟動器開啟既有的 App 即可。
 - Google Fonts 以非阻塞方式載入(`media="print"` onload 切換):字型 CDN 慢或不可達時,App 照常啟動、以系統字型顯示。
 
 ## 分享捷徑(Android)

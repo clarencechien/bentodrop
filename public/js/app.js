@@ -1247,6 +1247,7 @@ async function renderSettings() {
           <button class="btn inline" id="stPair" type="button">加一台裝置</button>
           <button class="btn ghost inline" id="stTestPush" type="button">測試推送</button>
           <button class="btn ghost inline" id="stEnablePush" type="button">啟用本機通知</button>
+          ${isStandalone() ? "" : '<button class="btn ghost inline" id="stInstall" type="button">安裝成 App</button>'}
         </div>
         <div id="pushResult"></div>
       </div>
@@ -1397,6 +1398,22 @@ async function renderSettings() {
     const ok = await ensurePush({ interactive: true });
     toast(ok ? "推送已啟用 ✓" : "無法啟用推送(權限被拒或瀏覽器不支援)", !ok);
   };
+  // Always-reachable install entry — survives a dismissed banner, and on a
+  // device where the app is already installed (no beforeinstallprompt) it
+  // still opens the how-to guide.
+  const $install = root.querySelector("#stInstall");
+  if ($install) {
+    $install.onclick = async () => {
+      if (deferredInstallPrompt) {
+        deferredInstallPrompt.prompt();
+        const { outcome } = await deferredInstallPrompt.userChoice;
+        deferredInstallPrompt = null;
+        if (outcome === "accepted") toast("已安裝 ✓ 之後從 App 圖示開啟");
+        return;
+      }
+      showInstallGuide();
+    };
+  }
   root.querySelector("#stPreview").onchange = async (e) => {
     await kvSet(K.NOTIFY_PREVIEW, e.target.checked); // read by sw.js (§6.3)
   };

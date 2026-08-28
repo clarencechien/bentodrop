@@ -484,6 +484,11 @@ test("install banner: shows in a browser tab, opens platform steps, dismiss pers
   await page.reload();
   await expect(page.locator(".paste-dock")).toBeVisible();
   await expect(page.locator("#installBanner")).toHaveCount(0);
+
+  // …but the settings entry is always reachable, even after dismissal.
+  await page.getByRole("button", { name: "設定" }).click();
+  await page.getByRole("button", { name: "安裝成 App" }).click();
+  await expect(page.locator(".modal .install-steps li").first()).toBeVisible();
   await context.close();
 });
 
