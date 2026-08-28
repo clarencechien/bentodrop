@@ -126,6 +126,12 @@ e2e/                    Playwright E2E(11)
 scripts/                setup / gen-vapid / gen-icons / e2e-server
 ```
 
+## 分享捷徑(Android)
+
+安裝 PWA 後,BentoDrop 會出現在 Android 的系統分享面板(Web Share Target)。從任何 App 分享文字、連結或圖片 → 選 BentoDrop → **Service Worker 直接在背景完成壓縮、加密、上傳、送出**,畫面只會閃一下「分享內容已加密送達 ✓」,不需要在 App 裡再操作。
+
+iOS 的 PWA 不支援 share target(Safari 限制)。替代方案:用「捷徑」App 建一個分享表單捷徑,對 `/api/push` 發 POST(需 API token;捷徑做不了 ECDH,只能走明文模式,內容會標示「未加密」且 24 小時後刪除)。
+
 ## CLI:腳本推送(§12.3)
 
 零依賴(Node 18+),重用 PWA 的加密模組,不需安裝任何套件:
@@ -147,7 +153,7 @@ node cli/bentodrop-push.mjs --plain "磁碟 85%"  # 明文模式(token 需開啟
 - **M2 加密** ✅ K_master/HKDF、envelope、短文字 E2E、備份(顯示+複製+抽 3 詞)
 - **M3 多裝置** ✅ URL+配對碼、三護欄、舊裝置確認、fan-out、410 清理、測試推送
 - **M4 檔案** ✅ 簽名直傳、20MB 上限、client 壓縮(canvas,EXIF 剝除+方向烘焙、HEIC 原檔 fallback)、meta 加密、清理
-- **M5 打磨** ✅ 通知隱私開關、通知「複製/開啟」action(§7.2:app 聚焦後嘗試寫剪貼簿,失敗退回詳情頁按鈕;「開啟」僅限 https)、備份取出:複製/QR/下載/列印、還原碼 QR 照片匯入(原生 BarcodeDetector,fallback jsQR)、配對與邀請 QR、裝置與好友別名、貼上就送(預設直送,可勾掉)、失效偵測 UI
+- **M5 打磨** ✅ 通知隱私開關、通知「複製/開啟」action(§7.2:app 聚焦後嘗試寫剪貼簿,失敗退回詳情頁按鈕;「開啟」僅限 https)、備份取出:複製/QR/下載/列印、還原碼 QR 照片匯入(原生 BarcodeDetector,fallback jsQR)、配對與邀請 QR、裝置與好友別名、剪貼簿 composer(權限授予後自動顯示反灰預覽 — 文字或圖片縮圖 — 單一主鍵「⚡即送」;開始打字即切換為「送出」;點預覽可改為手動編輯)、失效偵測 UI
 - **M6 API** ✅ token 管理、明文模式端點(24h 保留上限)、**CLI 公鑰加密模式**(`cli/bentodrop-push.mjs`)
 - **Phase 2(§11)** ✅ user 層級身分金鑰、加好友(§6.7 機制)、跨 user 加密收發(文字+檔案)、解除好友即封鎖、改名
 

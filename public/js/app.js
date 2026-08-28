@@ -280,10 +280,14 @@ function renderInbox() {
           <p class="big" style="flex:none">裝好,送出</p>
           <select id="sendTarget" style="margin-left:auto"><option value="">我的全部裝置</option></select>
         </div>
+        <button class="clip-preview" id="clipPreview" type="button" hidden>
+          <span class="cp-tag">剪貼簿</span>
+          <span class="cp-body" id="clipBody"></span>
+          <span class="cp-hint" id="clipHint">點一下改成手動編輯</span>
+        </button>
         <textarea id="composeText" placeholder="輸入或貼上文字、連結…" maxlength="100000"></textarea>
         <div class="file-row">
           <button class="btn inline" id="sendBtn" type="button">送出</button>
-          <button class="btn inline" id="pasteSendBtn" type="button" hidden>貼上就送</button>
           <label class="btn ghost inline" style="margin:0">
             選圖片 / 檔案<input id="fileInput" type="file" hidden>
           </label>
@@ -291,9 +295,7 @@ function renderInbox() {
             <input type="checkbox" id="origMode">原檔(保留 EXIF/GPS)
           </label>
         </div>
-        <label class="small muted" id="pasteDirectRow" style="display:flex;align-items:center;gap:5px;margin-top:6px" hidden>
-          <input type="checkbox" id="pasteDirect">貼上後直接送出(取消勾選則先填入輸入框)
-        </label>
+        <p class="btn-note" id="composeHint" style="text-align:left;margin-top:6px"></p>
         <div id="sendStatus"></div>
       </div>
       <div class="inbox-head"><b>收件匣</b><span class="cnt" id="unreadCnt" hidden></span>
@@ -331,31 +333,165 @@ function renderInbox() {
     }
   }
 
-  // Paste-to-send: default is "read clipboard and send immediately";
-  // unchecking the switch fills the composer instead.
-  const $pasteBtn = root.querySelector("#pasteSendBtn");
-  const $pasteDirect = root.querySelector("#pasteDirect");
-  if (navigator.clipboard?.readText) {
-    $pasteBtn.hidden = false;
-    root.querySelector("#pasteDirectRow").hidden = false;
-    kvGet(K.PASTE_DIRECT).then((v) => { $pasteDirect.checked = v !== false; });
-    $pasteDirect.onchange = () => kvSet(K.PASTE_DIRECT, $pasteDirect.checked);
-    $pasteBtn.onclick = async () => {
-      let text;
-      try {
-        text = (await navigator.clipboard.readText()).trim();
-      } catch {
-        return toast("無法讀取剪貼簿(權限被拒),請手動貼上", true);
+  async function sendFileNow(file, { original = false } = {}) {
+    const $status = root.querySelector("#sendStatus");
+    if (original && isImage(file)) {
+      toast("原檔模式:EXIF 與 GPS 位置會完整保留", true);
+    }
+    $status.replaceChildren(el(`<ul class="receipts"><li><b>…</b> 處理中</li></ul>`));
+    try {
+      const prepared = await compressImage(file, { original });
+      if (!prepared.compressed && isImage(file) && !original) {
+        toast(isHeic(file) ? "這張圖無法在瀏覽器中壓縮,將以原檔傳送(含 EXIF)" : "無法壓縮,以原檔傳送(含 EXIF)", true);
       }
-      if (!text) return toast("剪貼簿是空的", true);
-      if ($pasteDirect.checked) {
-        await sendTextNow(text);
-      } else {
-        root.querySelector("#composeText").value = text;
-        toast("已貼入,按送出");
-      }
-    };
+      const target = currentTarget();
+      const { envelope, ciphertext } = target
+        ? await C.encryptFileEnvelopeFor(target.peerPubkey, state.userId, prepared.bytes, prepared.name, prepared.mime)
+        : await C.encryptFileEnvelope(state.kMaster, state.userId, prepared.bytes, prepared.name, prepared.mime);
+      const up = await api.uploadUrl(envelope.id, ciphertext.byteLength);
+      await api.putObject(up.url, ciphertext);
+      const res = await api.send(envelope, target?.peerUserId);
+      showReceipts($status, res.receipts, target?.label);
+      await refreshMessages().catch(() => {});
+      paint();
+      return true;
+    } catch (err) {
+      $status.replaceChildren(el(`<div class="banner err">送出失敗:${esc(err.message)}</div>`));
+      return false;
+    }
   }
+
+  // ── clipboard composer: one primary button whose meaning tracks state ──
+  //   ⚡即送   — a clipboard preview is showing; sends exactly that, now
+  //   送出     — the user typed something; sends the typed content
+  //   ⚡貼上就送 — composer empty, clipboard unknown; reads (may prompt) and sends
+  const $text = root.querySelector("#composeText");
+  const $sendBtn = root.querySelector("#sendBtn");
+  const $preview = root.querySelector("#clipPreview");
+  const $clipBody = root.querySelector("#clipBody");
+  const $clipHint = root.querySelector("#clipHint");
+  const $hint = root.querySelector("#composeHint");
+  let clip = null;          // {kind:'text',text} | {kind:'image',type,blob,url}
+  let clipReadable = false; // permission granted → allowed to auto-preview
+  let lastSentSig = null;   // avoid re-offering content that was just sent
+  const clipSig = (c) => (c.kind === "text" ? `t:${c.text}` : `i:${c.type}:${c.blob.size}`);
+
+  async function readClipboard({ interactive = false } = {}) {
+    if (!navigator.clipboard) return null;
+    try {
+      if (!interactive) {
+        // Never surprise the user with a permission prompt (§7.2 spirit).
+        const perm = await navigator.permissions?.query({ name: "clipboard-read" }).catch(() => null);
+        if (perm?.state !== "granted") return null;
+      }
+      if (navigator.clipboard.read) {
+        for (const item of await navigator.clipboard.read()) {
+          const imgType = item.types.find((t) => t.startsWith("image/"));
+          if (imgType) return { kind: "image", type: imgType, blob: await item.getType(imgType) };
+          if (item.types.includes("text/plain")) {
+            const text = (await (await item.getType("text/plain")).text()).trim();
+            return text ? { kind: "text", text } : null;
+          }
+        }
+        return null;
+      }
+      const text = (await navigator.clipboard.readText()).trim();
+      return text ? { kind: "text", text } : null;
+    } catch {
+      if (interactive) throw new Error("無法讀取剪貼簿(權限被拒),請長按貼上");
+      return null;
+    }
+  }
+
+  function updateComposeUI() {
+    const typed = $text.value.trim().length > 0;
+    const showClip = !typed && clip !== null && clipSig(clip) !== lastSentSig;
+    $preview.hidden = !showClip;
+    if (showClip) {
+      if (clip.kind === "text") {
+        $clipBody.textContent = clip.text.slice(0, 120);
+        $clipHint.hidden = false;
+      } else {
+        if (!clip.url) clip.url = URL.createObjectURL(clip.blob);
+        $clipBody.replaceChildren(el(`<img alt="剪貼簿圖片" src="${clip.url}">`));
+        $clipHint.hidden = true;
+      }
+      $sendBtn.textContent = "即送";
+      $sendBtn.classList.add("zap");
+      $hint.textContent = clip.kind === "text"
+        ? "即送 = 直接送出上面的剪貼簿內容;想改內容就點預覽"
+        : "即送 = 直接送出剪貼簿裡的圖片(會自動壓縮)";
+    } else if (typed) {
+      $sendBtn.textContent = "送出";
+      $sendBtn.classList.remove("zap");
+      $hint.textContent = "";
+    } else if (navigator.clipboard && !clipReadable) {
+      $sendBtn.textContent = "貼上就送";
+      $sendBtn.classList.add("zap");
+      $hint.textContent = "貼上就送 = 讀取剪貼簿並直接送出(第一次會詢問權限)";
+    } else {
+      $sendBtn.textContent = "送出";
+      $sendBtn.classList.remove("zap");
+      $hint.textContent = "";
+    }
+  }
+
+  async function refreshClipboard() {
+    const perm = await navigator.permissions?.query({ name: "clipboard-read" }).catch(() => null);
+    clipReadable = perm?.state === "granted";
+    if (clipReadable) clip = await readClipboard();
+    updateComposeUI();
+  }
+
+  $text.addEventListener("input", updateComposeUI);
+  $preview.onclick = () => {
+    // Escape hatch from 即送: move the text into the composer for editing.
+    if (clip?.kind === "text") {
+      $text.value = clip.text;
+      $text.focus();
+      updateComposeUI();
+    }
+  };
+
+  $sendBtn.onclick = async () => {
+    const typed = $text.value.trim();
+    if (typed) {
+      if (await sendTextNow(typed)) {
+        $text.value = "";
+        updateComposeUI();
+      }
+      return;
+    }
+    let c = clip !== null && clipSig(clip) !== lastSentSig ? clip : null;
+    if (!c) {
+      try {
+        c = await readClipboard({ interactive: true }); // 貼上就送 (may prompt)
+      } catch (err) {
+        return toast(err.message, true);
+      }
+      clipReadable = true;
+      if (!c) {
+        updateComposeUI();
+        return toast("剪貼簿是空的,直接輸入內容也可以", true);
+      }
+    }
+    const ok = c.kind === "text"
+      ? await sendTextNow(c.text)
+      : await sendFileNow(new File([c.blob], `clipboard.${c.type.split("/")[1] ?? "png"}`, { type: c.type }));
+    if (ok) {
+      lastSentSig = clipSig(c);
+      clip = null;
+      updateComposeUI();
+    }
+  };
+
+  refreshClipboard();
+  if (state._focusHandler) window.removeEventListener("focus", state._focusHandler);
+  state._focusHandler = () => {
+    refreshClipboard();
+    refreshMessages().then(paint).catch(() => {});
+  };
+  window.addEventListener("focus", state._focusHandler);
 
   const $list = root.querySelector("#msgList");
   const $cnt = root.querySelector("#unreadCnt");
@@ -406,44 +542,13 @@ function renderInbox() {
     paint();
   };
 
-  // send text
-  root.querySelector("#sendBtn").onclick = async () => {
-    const $t = root.querySelector("#composeText");
-    const text = $t.value.trim();
-    if (!text) return toast("先輸入一點內容", true);
-    if (await sendTextNow(text)) $t.value = "";
-  };
-
   // send file (§3.2 + §4.4)
   root.querySelector("#fileInput").onchange = async (e) => {
     const file = e.target.files[0];
     e.target.value = "";
     if (!file) return;
     if (file.size > 20 * 1024 * 1024) return toast("上限 20 MB", true);
-    const original = root.querySelector("#origMode").checked;
-    const $status = root.querySelector("#sendStatus");
-    if (original && isImage(file)) {
-      toast("原檔模式:EXIF 與 GPS 位置會完整保留", true);
-    }
-    $status.replaceChildren(el(`<ul class="receipts"><li><b>…</b> 處理中</li></ul>`));
-    try {
-      const prepared = await compressImage(file, { original });
-      if (!prepared.compressed && isImage(file) && !original) {
-        toast(isHeic(file) ? "這張圖無法在瀏覽器中壓縮,將以原檔傳送(含 EXIF)" : "無法壓縮,以原檔傳送(含 EXIF)", true);
-      }
-      const target = currentTarget();
-      const { envelope, ciphertext } = target
-        ? await C.encryptFileEnvelopeFor(target.peerPubkey, state.userId, prepared.bytes, prepared.name, prepared.mime)
-        : await C.encryptFileEnvelope(state.kMaster, state.userId, prepared.bytes, prepared.name, prepared.mime);
-      const up = await api.uploadUrl(envelope.id, ciphertext.byteLength);
-      await api.putObject(up.url, ciphertext);
-      const res = await api.send(envelope, target?.peerUserId);
-      showReceipts($status, res.receipts, target?.label);
-      await refreshMessages().catch(() => {});
-      paint();
-    } catch (err) {
-      $status.replaceChildren(el(`<div class="banner err">送出失敗:${esc(err.message)}</div>`));
-    }
+    await sendFileNow(file, { original: root.querySelector("#origMode").checked });
   };
 
   refreshMessages().then(paint).catch(() => {
@@ -1099,11 +1204,14 @@ async function renderSettings() {
   for (const d of me.devices) {
     const row = el(`
       <div class="dev-row">
-        <span class="lab">${esc(d.label ?? "裝置")}${d.isSelf ? "(這台)" : ""}</span>
-        <span class="meta">${d.lastSeenAt ? "最近活動 " + fmtTime(d.lastSeenAt) : "未曾連線"}${d.subscribed ? "" : " · 未訂閱推送"}</span>
-        ${d.maybeDead ? '<span class="dead">可能已失效</span>' : ""}
-        <span class="spacer"></span>
+        <div class="dev-info">
+          <span class="lab">${esc(d.label ?? "裝置")}${d.isSelf ? "(這台)" : ""}</span>
+          <span class="meta">${d.lastSeenAt ? "最近活動 " + fmtTime(d.lastSeenAt) : "未曾連線"}${d.subscribed ? "" : " · 未訂閱推送"}</span>
+          ${d.maybeDead ? '<span class="dead">可能已失效</span>' : ""}
+        </div>
+        <div class="dev-actions"></div>
       </div>`);
+    const $actions = row.querySelector(".dev-actions");
     const rename = el(`<button class="btn ghost inline" type="button">改名</button>`);
     rename.onclick = async () => {
       const label = prompt("裝置別名", d.label ?? "")?.trim();
@@ -1120,7 +1228,7 @@ async function renderSettings() {
         toast(err.message, true);
       }
     };
-    row.append(rename);
+    $actions.append(rename);
     if (!d.isSelf) {
       const rm = el(`<button class="btn ghost inline" type="button">移除</button>`);
       rm.onclick = async () => {
@@ -1128,7 +1236,7 @@ async function renderSettings() {
         await api.deleteDevice(d.deviceId).catch((err) => toast(err.message, true));
         renderSettings();
       };
-      row.append(rm);
+      $actions.append(rm);
     }
     $dev.append(row);
   }
@@ -1144,9 +1252,11 @@ async function renderSettings() {
     for (const c of state.contacts) {
       const row = el(`
         <div class="dev-row">
-          <span class="lab">${esc(c.label)}</span>
-          <span class="meta">${new Date(c.createdAt).toLocaleDateString()} 加入</span>
-          <span class="spacer"></span>
+          <div class="dev-info">
+            <span class="lab">${esc(c.label)}</span>
+            <span class="meta">${new Date(c.createdAt).toLocaleDateString()} 加入</span>
+          </div>
+          <div class="dev-actions"></div>
         </div>`);
       const rn = el(`<button class="btn ghost inline" type="button">改名</button>`);
       rn.onclick = async () => {
@@ -1161,7 +1271,7 @@ async function renderSettings() {
         await api.deleteContact(c.peerUserId).catch((err) => toast(err.message, true));
         renderSettings();
       };
-      row.append(rn, rm);
+      row.querySelector(".dev-actions").append(rn, rm);
       $friends.append(row);
     }
   });
@@ -1255,6 +1365,15 @@ async function renderSettings() {
 
 // ── boot ─────────────────────────────────────────────────────────────
 async function boot() {
+  // Landed here after a share-sheet send handled by the service worker.
+  const shared = new URLSearchParams(location.search).get("shared");
+  if (shared) {
+    history.replaceState(null, "", "/");
+    setTimeout(() => {
+      toast(shared === "sent" ? "分享內容已加密送達 ✓" : "分享送出失敗,請直接在這裡送", shared !== "sent");
+    }, 400);
+  }
+
   if ("serviceWorker" in navigator) {
     navigator.serviceWorker.register("/sw.js", { type: "module" }).catch((err) => {
       console.warn("SW registration failed", err);
