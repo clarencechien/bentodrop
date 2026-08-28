@@ -5,6 +5,7 @@ import { K, kvDelete, kvGet, kvSet } from "./store.js";
 import { compressImage, isHeic, isImage } from "./image.js";
 import { qrSvg } from "./qr.js";
 import { decodeQrFromFile } from "./qr-import.js";
+import { formatReport, runDiagnostics } from "./diag.js";
 
 const $app = document.getElementById("app");
 const $nav = document.getElementById("topNav");
@@ -1324,6 +1325,14 @@ async function renderSettings() {
       </div>
 
       <div class="compartment">
+        <h3>診斷</h3>
+        <p class="small muted">測量這台裝置到伺服器的實際速度:加密、上傳、下載各花多久,R2 離邊緣節點多遠。會上傳約 4 MB 的測試資料,測完立即刪除。</p>
+        <button class="btn inline" id="diagStart" type="button" style="margin-top:8px">開始測試</button>
+        <ul class="receipts" id="diagProgress" style="margin-top:10px"></ul>
+        <div id="diagResult"></div>
+      </div>
+
+      <div class="compartment">
         <h3>清空與重設</h3>
         <div class="row">
           <button class="btn ghost inline" id="stClearMsgs" type="button">清空收件匣(所有裝置)</button>
@@ -1451,6 +1460,59 @@ async function renderSettings() {
     toast("已更新保留期");
   };
   root.querySelector("#stBackup").onclick = () => renderBackup();
+
+  // Transport diagnostics — per-step checklist (no spinners), verdict first.
+  root.querySelector("#diagStart").onclick = async () => {
+    const $btn = root.querySelector("#diagStart");
+    const $prog = root.querySelector("#diagProgress");
+    const $res = root.querySelector("#diagResult");
+    $btn.disabled = true;
+    $btn.textContent = "測試中…";
+    $prog.replaceChildren();
+    $res.replaceChildren();
+    const items = new Map();
+    try {
+      const result = await runDiagnostics(state.kMaster, state.userId, {
+        onStep: (label) => {
+          const li = el(`<li><b>…</b> <span>${esc(label)}</span></li>`);
+          items.set(label, li);
+          $prog.append(li);
+        },
+        onStepDone: (label) => {
+          const li = items.get(label);
+          if (li) li.querySelector("b").textContent = "✓";
+        },
+      });
+
+      const box = el(`<div style="margin-top:12px"></div>`);
+      for (const c of result.conclusions) {
+        box.append(el(`<div class="diag-verdict ${c.level}">${c.level === "warn" ? "⚠" : c.level === "ok" ? "✓" : "·"} ${esc(c.text)}</div>`));
+      }
+      const mb = result.sizes.find((s) => s.label === "1 MB");
+      const table = el(`<div class="diag-table"></div>`);
+      const row = (k, v, flag = "") => table.append(el(`<div><span>${esc(k)}</span><span>${esc(v)}${flag}</span></div>`));
+      row("你 → 邊緣節點" + (result.env.colo ? `(${result.env.colo})` : ""), `${result.edgeRttMs} ms`);
+      row("邊緣節點 → R2(GET)", `${result.env.r2.getMs} ms`, result.env.r2.getMs > 100 ? " ⚠" : " ✓");
+      if (mb) {
+        row("上傳 1 MB", `${mb.uploadMs} ms`);
+        row("下載 1 MB", `${mb.downloadMs} ms`);
+        row("加密 1 MB", `${mb.encryptMs} ms`);
+        row("1 MB 端到端", `${mb.e2eMs} ms(${mb.e2eMinMs}–${mb.e2eMaxMs})`);
+      }
+      for (const s of result.sizes.filter((x) => x.label !== "1 MB")) {
+        row(`${s.label} 端到端`, `${s.e2eMs} ms(${s.e2eMinMs}–${s.e2eMaxMs})`);
+      }
+      row("圖片壓縮", result.compressMs === null ? "未測量" : `${result.compressMs} ms`, result.compressMs > 300 ? " ⚠" : "");
+      row("推送送達", "未測量");
+      const copy = el(`<button class="btn ghost inline" type="button" style="margin-top:10px">複製報告</button>`);
+      copy.onclick = () => copyText(formatReport(result));
+      $res.append(box, table, copy);
+    } catch (err) {
+      $res.replaceChildren(el(`<div class="banner err">診斷失敗:${esc(err.message)}</div>`));
+    }
+    $btn.disabled = false;
+    $btn.textContent = "再測一次";
+  };
   root.querySelector("#stClearMsgs").onclick = async () => {
     if (!confirm("清空所有訊息?所有裝置都會消失,已下載到本機的副本不受影響。")) return;
     await api.clearMessages().catch((err) => toast(err.message, true));

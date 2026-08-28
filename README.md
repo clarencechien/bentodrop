@@ -139,6 +139,16 @@ scripts/                deploy(零設定部署)/ gen-vapid / gen-icons / e2e-ser
 - **已安裝偵測**:透過 `getInstalledRelatedApps()`(Android/Chromium,manifest 有對應宣告)加上 standalone 開啟/`appinstalled` 事件記住的旗標,判定這台裝置已裝過 → 安裝橫幅、設定頁「安裝成 App」、landing 的安裝 CTA **全部不再顯示**;偵測到已解除安裝(API 回空)會自動恢復顯示。`beforeinstallprompt` 在已安裝的裝置上本來就不會再觸發(Chrome 行為)。
 - Google Fonts 以非阻塞方式載入(`media="print"` onload 切換):字型 CDN 慢或不可達時,App 照常啟動、以系統字型顯示。
 
+## 傳輸診斷(設定頁)
+
+回答「檔案繞 Cloudflare 是不是很慢?要不要做 WebRTC?」— 用數字,不用猜。設定 → 診斷 → 開始測試:
+
+- **三組測量,時鐘絕不跨裝置**:客戶端(加密/解密/圖片壓縮)、網路(echo RTT、1KB/256KB/1MB 各跑多次的上傳與下載)、伺服器自報(`GET /api/diag/env`:colo、Worker↔R2 HEAD/GET/PUT、D1,各取 3 次中位數)— **R2 的 GET 延遲是最關鍵的數字**,>100ms 代表 bucket 不在亞太,該先搬 bucket 而不是談協定
+- 每個大小丟掉第一次(連線暖機),回報**中位數**與 min–max;測試資料是隨機位元組(HTTP 壓縮無法灌水);每輪解密後驗證內容一致
+- **先給結論再給數字**(寫死的判斷規則):1MB 端到端 <1.5s → 「不值得做 P2P」;R2 GET >100ms → 「先搬 bucket」;壓縮 >300ms → 「瓶頸是 CPU 不是網路」;下載 ≫ 上傳 → 「做預取比換協定有效」。推送送達明確標「未測量」
+- 「複製報告」產出純文字(含原始數據、UA、colo),可直接貼 issue
+- 隔離與安全:全端點裝置認證;key 由 Worker 組在 `diag/{userId}/` 下(不收客戶端 key);上限 5MB/echo 64KB;每裝置每小時 20 次;**不建 messages 列、不觸發推送**;測完客戶端即刪,cron 每 15 分鐘掃掉 >1 小時的殘留,R2 lifecycle(diag/ 1 天)為第三道保險
+
 ## 分享捷徑(Android)
 
 安裝 PWA 後,BentoDrop 會出現在 Android 的系統分享面板(Web Share Target)。從任何 App 分享文字、連結或圖片 → 選 BentoDrop → **Service Worker 直接在背景完成壓縮、加密、上傳、送出**,畫面只會閃一下「分享內容已加密送達 ✓」,不需要在 App 裡再操作。
