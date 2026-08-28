@@ -76,6 +76,9 @@ try {
   } else {
     console.log("R2 lifecycle rule already present");
   }
+  if (!rules.includes("expire-diag")) {
+    sh('npx wrangler r2 bucket lifecycle add bentodrop-inbox --name expire-diag --prefix "diag/" --expire-days 1 --force');
+  }
 } catch (err) {
   console.warn("⚠ could not verify the R2 lifecycle rule — add it in the dashboard if missing:");
   console.warn("  bucket bentodrop-inbox, prefix u/, delete after 7 days (§4.1)");

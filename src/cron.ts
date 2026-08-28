@@ -1,7 +1,8 @@
 import type { Env } from "./types";
+import { cleanupDiagObjects } from "./routes/diag";
 
-/** §10: expired messages (rows + R2 objects) and stale pairings. */
-export async function cleanupExpired(env: Env, now = Date.now()): Promise<{ messages: number; pairings: number }> {
+/** §10: expired messages (rows + R2 objects), stale pairings, old diag objects. */
+export async function cleanupExpired(env: Env, now = Date.now()): Promise<{ messages: number; pairings: number; diag: number }> {
   const rows = await env.DB.prepare(
     "DELETE FROM messages WHERE expires_at <= ? RETURNING r2_key",
   ).bind(now).all<{ r2_key: string | null }>();
@@ -12,5 +13,7 @@ export async function cleanupExpired(env: Env, now = Date.now()): Promise<{ mess
     "DELETE FROM pairings WHERE expires_at <= ? RETURNING pair_id",
   ).bind(now).all();
 
-  return { messages: rows.results?.length ?? 0, pairings: pairings.results?.length ?? 0 };
+  const diag = await cleanupDiagObjects(env, now);
+
+  return { messages: rows.results?.length ?? 0, pairings: pairings.results?.length ?? 0, diag };
 }

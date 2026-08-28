@@ -13,6 +13,7 @@ import {
   deleteContact, getIdentity, listContacts, renameContact, setIdentity,
 } from "./routes/contacts";
 import { deleteDevice, handleMe, handleSubscribe, handleTestPush, renameDevice } from "./routes/devices";
+import { diagDelete, diagEcho, diagEnv, diagUploadUrl } from "./routes/diag";
 import { cleanupExpired } from "./cron";
 
 const DEPLOY_HINT =
@@ -91,6 +92,10 @@ async function handleApi(req: Request, env: Env, path: string): Promise<Response
   if (path === "/api/contacts" && method === "GET") return listContacts(env, device);
   if (path === "/api/contacts/invite" && method === "POST") return contactInvite(req, env, device);
   if (path === "/api/contacts/claim" && method === "POST") return contactClaim(req, env, device);
+  if (path === "/api/diag/env" && method === "GET") return diagEnv(req, env, device);
+  if (path === "/api/diag/upload-url" && method === "POST") return diagUploadUrl(req, env, device);
+  if (path === "/api/diag/object" && method === "DELETE") return diagDelete(req, env, device);
+  if (path === "/api/diag/echo" && method === "POST") return diagEcho(req, env, device);
 
   let m: RegExpExecArray | null;
   if ((m = /^\/api\/messages\/([A-Za-z0-9_-]+)\/read$/.exec(path)) && method === "POST") {
