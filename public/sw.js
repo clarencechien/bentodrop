@@ -6,11 +6,11 @@
 //  - decryption failure still shows a generic notification — iOS revokes
 //    push permission if a push produces no notification (§5.5)
 
-import { decryptTextEnvelope, decryptFileMeta, deriveKmaster, detectTextKind } from "./js/crypto.js";
+import { decryptTextEnvelope, decryptFileMeta, decryptJson, deriveKmaster, detectTextKind, importIdentityPrivate } from "./js/crypto.js";
 import { K, kvGet } from "./js/store.js";
 
-const SHELL_CACHE = "bentodrop-shell-v2";
-const SHELL = ["/", "/styles.css", "/js/app.js", "/js/crypto.js", "/js/api.js", "/js/store.js", "/js/image.js", "/js/wordlist.js", "/js/qr.js", "/js/vendor/lean-qr.mjs", "/manifest.webmanifest"];
+const SHELL_CACHE = "bentodrop-shell-v3";
+const SHELL = ["/", "/styles.css", "/js/app.js", "/js/crypto.js", "/js/api.js", "/js/store.js", "/js/image.js", "/js/wordlist.js", "/js/qr.js", "/js/qr-import.js", "/js/vendor/lean-qr.mjs", "/manifest.webmanifest"];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(SHELL_CACHE).then((c) => c.addAll(SHELL)).catch(() => {}));
@@ -43,11 +43,19 @@ self.addEventListener("fetch", (event) => {
   })());
 });
 
-async function getKmaster() {
+/** Keyring for decrypting push payloads: K_master plus (when available) the
+ *  user identity key for ecdh-p256 envelopes from contacts (§11). */
+async function getKeys() {
   const entropy = await kvGet(K.ENTROPY);
   const userName = await kvGet(K.USER_NAME);
   if (!entropy) return null;
-  return deriveKmaster(entropy, userName);
+  const kMaster = await deriveKmaster(entropy, userName);
+  const ring = { kMaster, identityPriv: null };
+  try {
+    const wrapped = await kvGet(K.IDENTITY_WRAPPED);
+    if (wrapped) ring.identityPriv = await importIdentityPrivate(await decryptJson(kMaster, wrapped));
+  } catch { /* generic notification fallback covers it */ }
+  return ring;
 }
 
 self.addEventListener("push", (event) => {
@@ -63,23 +71,31 @@ self.addEventListener("push", (event) => {
         const e = payload.envelope;
         notif.data = { msgId: payload.msgId };
         if (previewOn) {
+          const textData = (text) => {
+            // §7.2.1: the whitelist decides the actions — 開啟 only for https.
+            const det = detectTextKind(text);
+            return {
+              msgId: payload.msgId,
+              text,
+              url: det.kind === "url" ? det.url : null,
+            };
+          };
           if (e.plain) {
             // §12.4 plaintext mode — show as-is, tagged unencrypted in-app.
-            notif = { title: payload.from ?? "BentoDrop", body: String(e.text).slice(0, 80), data: { msgId: payload.msgId, kind: "text" } };
+            notif = { title: payload.from ?? "BentoDrop", body: String(e.text).slice(0, 80), data: textData(String(e.text)) };
           } else {
-            const kMaster = await getKmaster();
-            if (kMaster && e.kind === "text") {
-              const text = await decryptTextEnvelope(kMaster, e);
-              const det = detectTextKind(text);
+            const keys = await getKeys();
+            if (keys && e.kind === "text") {
+              const text = await decryptTextEnvelope(keys, e);
               notif = {
                 title: payload.from ?? "BentoDrop",
                 body: text.slice(0, 80), // §7.3: first 80 chars
-                data: { msgId: payload.msgId, kind: det.kind },
+                data: textData(text),
               };
-            } else if (kMaster && e.kind === "file") {
-              const meta = await decryptFileMeta(kMaster, e);
+            } else if (keys && e.kind === "file") {
+              const meta = await decryptFileMeta(keys, e);
               const mb = e.size ? ` · ${(e.size / 1024 / 1024).toFixed(1)} MB` : "";
-              notif = { title: payload.from ?? "BentoDrop", body: `${meta.name}${mb}`, data: { msgId: payload.msgId, kind: "file" } };
+              notif = { title: payload.from ?? "BentoDrop", body: `${meta.name}${mb}`, data: { msgId: payload.msgId } };
             }
           }
         }
@@ -89,9 +105,12 @@ self.addEventListener("push", (event) => {
       console.warn("push decrypt failed", err);
       notif = generic;
     }
-    const actions = notif.data?.kind === "url"
-      ? [{ action: "open", title: "開啟" }]
-      : notif.data?.kind ? [{ action: "copy", title: "複製" }] : [];
+    // §7.2: action buttons on the notification — 複製 for text (the app,
+    // once focused, attempts the clipboard write; failure falls back to the
+    // detail view's copy button), 開啟 only for whitelisted https URLs.
+    const actions = [];
+    if (notif.data?.url) actions.push({ action: "open-url", title: "開啟" });
+    if (notif.data?.text) actions.push({ action: "copy", title: "複製" });
     await self.registration.showNotification(notif.title, {
       body: notif.body,
       icon: "/icons/icon-192.png",
@@ -105,18 +124,27 @@ self.addEventListener("push", (event) => {
 
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
-  const msgId = event.notification.data?.msgId;
-  const wantCopy = event.action === "copy";
+  const data = event.notification.data ?? {};
+  const action = event.action;
   event.waitUntil((async () => {
+    // 開啟 action: the user explicitly tapped it, so navigating to the
+    // (https-only, §7.2.1) URL is their click — not auto-navigation.
+    if (action === "open-url" && data.url && data.url.startsWith("https://")) {
+      await self.clients.openWindow(data.url);
+      return;
+    }
     const all = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
     const client = all.find((c) => new URL(c.url).origin === location.origin);
+    const msg = action === "copy"
+      ? { t: "copy-msg", msgId: data.msgId, text: data.text }
+      : { t: "open-msg", msgId: data.msgId };
     if (client) {
       await client.focus();
-      client.postMessage({ t: "open-msg", msgId, copy: wantCopy });
+      client.postMessage(msg);
     } else {
       const win = await self.clients.openWindow("/");
-      // Give the app a moment to boot before telling it what to open.
-      if (win && msgId) setTimeout(() => win.postMessage({ t: "open-msg", msgId, copy: wantCopy }), 1500);
+      // Give the app a moment to boot before telling it what to do.
+      if (win && data.msgId) setTimeout(() => win.postMessage(msg), 1500);
     }
   })());
 });

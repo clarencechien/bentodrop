@@ -80,6 +80,7 @@ main{padding:26px 18px 80px}
 .mini .mt{font-size:13px;font-weight:500;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .mini .unread{width:6px;height:6px;border-radius:50%;background:var(--ume);margin-left:auto;flex:none}
 .tagx{font-family:"Space Mono",monospace;font-size:8.5px;letter-spacing:.06em;border:1px solid var(--tama);color:#8A6110;background:#FDF3DF;border-radius:3px;padding:0 4px}
+.tagf{font-family:"Space Mono",monospace;font-size:8.5px;letter-spacing:.06em;border:1px solid var(--gogo);color:#045F52;background:#E2F7F3;border-radius:3px;padding:0 4px}
 .empty{display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:10px;padding:36px 8px}
 .empty .ph{width:74px;height:52px;border:2px dashed rgba(23,42,38,.28);border-radius:9px}
 

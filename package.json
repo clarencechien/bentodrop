@@ -4,6 +4,9 @@
   "private": true,
   "description": "BentoDrop 便當 — cross-device end-to-end encrypted inbox on Cloudflare Workers",
   "type": "module",
+  "bin": {
+    "bentodrop-push": "cli/bentodrop-push.mjs"
+  },
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "node scripts/deploy.mjs",
