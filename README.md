@@ -136,7 +136,7 @@ scripts/                deploy(零設定部署)/ gen-vapid / gen-icons / e2e-ser
 
 - **Landing page / 使用手冊**:`/landing`(沿用 mockup 視覺,只介紹已實作的功能;「開始使用」導回 `/`)。含 Android / iOS / 桌面三平台的安裝步驟,iOS 特別強調必須「加入主畫面」才有推送(§9)。瀏覽器提供安裝提示時,hero 按鈕與安裝區的「📲 一鍵安裝」直接觸發原生安裝(`beforeinstallprompt`)。
 - **App 內安裝引導**:非 PWA 模式開啟時,開通頁與收件匣上方顯示安裝橫幅 — 支援 `beforeinstallprompt` 的環境一鍵安裝;其他(含 iOS)按「怎麼裝?」彈出對應平台的簡化步驟。橫幅可關閉(每台裝置記住);**設定頁的「安裝成 App」永遠找得到**,不受關閉影響。
-- 注意:`beforeinstallprompt` 在**已安裝過**的裝置上不會再觸發(Chrome 行為)— 此時一鍵安裝按鈕不出現是正常的,從主畫面/啟動器開啟既有的 App 即可。
+- **已安裝偵測**:透過 `getInstalledRelatedApps()`(Android/Chromium,manifest 有對應宣告)加上 standalone 開啟/`appinstalled` 事件記住的旗標,判定這台裝置已裝過 → 安裝橫幅、設定頁「安裝成 App」、landing 的安裝 CTA **全部不再顯示**;偵測到已解除安裝(API 回空)會自動恢復顯示。`beforeinstallprompt` 在已安裝的裝置上本來就不會再觸發(Chrome 行為)。
 - Google Fonts 以非阻塞方式載入(`media="print"` onload 切換):字型 CDN 慢或不可達時,App 照常啟動、以系統字型顯示。
 
 ## 分享捷徑(Android)
