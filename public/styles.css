@@ -14,6 +14,7 @@
   --shadow:0 1px 0 rgba(23,42,38,.06), 0 8px 24px -12px rgba(23,42,38,.28);
 }
 *{box-sizing:border-box;margin:0;padding:0}
+[hidden]{display:none !important}
 html{-webkit-text-size-adjust:100%}
 body{
   background:var(--box);
@@ -59,7 +60,7 @@ main{padding:26px 18px 80px}
 .field{border:2px solid var(--nori);border-radius:10px;padding:11px 13px;background:#fff;margin-top:14px}
 .field label{display:block;font-family:"Space Mono",monospace;font-size:9px;letter-spacing:.12em;color:var(--nori-soft);text-transform:uppercase}
 .field input,.field textarea{width:100%;border:0;outline:0;font:inherit;font-size:15px;background:transparent;margin-top:3px;resize:vertical}
-.btn{display:block;width:100%;margin-top:12px;background:var(--gogo);color:#04302A;border:2px solid var(--nori);border-radius:10px;padding:12px;text-align:center;font-weight:900;font-size:15px;font-family:"Archivo","Noto Sans TC",sans-serif;box-shadow:0 3px 0 var(--nori);cursor:pointer}
+.btn{display:block;width:100%;margin-top:12px;background:var(--gogo);color:#04302A;border:2px solid var(--nori);border-radius:10px;padding:12px;text-align:center;font-weight:900;font-size:15px;font-family:"Archivo","Noto Sans TC",sans-serif;box-shadow:0 3px 0 var(--nori);cursor:pointer;white-space:nowrap}
 .btn:active{transform:translateY(2px);box-shadow:0 1px 0 var(--nori)}
 .btn:disabled{opacity:.5;cursor:default}
 .btn.ghost{background:transparent;color:var(--nori-soft);box-shadow:none;border-color:rgba(23,42,38,.2);font-weight:700;font-size:13px;padding:10px}
@@ -89,6 +90,20 @@ main{padding:26px 18px 80px}
 .paste-dock .big{font-family:"Archivo",sans-serif;font-weight:900;font-size:15px;letter-spacing:-.02em}
 .paste-dock textarea{width:100%;border:2px solid var(--nori);border-radius:10px;background:#fff;font:inherit;font-size:14px;padding:10px;margin-top:10px;min-height:64px;resize:vertical}
 .paste-dock .file-row{display:flex;gap:8px;margin-top:8px;align-items:center;flex-wrap:wrap}
+.paste-dock select{max-width:52%;overflow:hidden;text-overflow:ellipsis}
+
+/* clipboard preview: grayed = "this is what 即送 will send" */
+.clip-preview{
+  display:flex;align-items:center;gap:9px;width:100%;margin-top:10px;
+  border:2px dashed var(--nori-soft);border-radius:10px;background:#E9EFEC;
+  padding:9px 11px;text-align:left;font:inherit;color:var(--nori-soft);cursor:pointer;
+}
+.clip-preview .cp-tag{flex:none;font-family:"Space Mono",monospace;font-size:9px;letter-spacing:.1em;border:1px solid var(--nori-soft);border-radius:3px;padding:1px 5px}
+.clip-preview .cp-body{flex:1;min-width:0;font-size:13px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;word-break:break-all}
+.clip-preview img{max-height:56px;max-width:96px;border-radius:6px;border:1.5px solid var(--nori-soft);display:block}
+.clip-preview .cp-hint{flex:none;font-size:10px;font-family:"Space Mono",monospace;letter-spacing:.04em}
+.btn.zap{background:var(--gogo)}
+.btn.zap::before{content:"⚡ "}
 
 /* receipts */
 .receipts{list-style:none;display:flex;flex-direction:column;gap:2px;margin-top:10px}
@@ -118,23 +133,28 @@ main{padding:26px 18px 80px}
 .word{border:1.5px solid rgba(23,42,38,.16);border-radius:6px;padding:6px 8px;background:#fff;font-family:"Space Mono",monospace;font-size:12px;display:flex;gap:6px;align-items:baseline}
 .word b{color:#B3BFBB;font-size:9px;font-weight:400;min-width:14px}
 .word input{border:0;outline:0;font:inherit;width:100%;background:transparent}
-.save-opts{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:12px}
+.save-opts{display:grid;grid-template-columns:repeat(auto-fit,minmax(62px,1fr));gap:6px;margin-top:12px}
 .save-opt{border:1.5px solid rgba(23,42,38,.18);border-radius:7px;padding:8px;text-align:center;font-size:11px;font-weight:700;background:none;font-family:inherit;cursor:pointer}
 .save-opt.pri{background:var(--gogo);border-color:var(--nori);color:#04302A}
 
-/* settings */
+/* settings — info column grows/shrinks, action buttons never wrap or squish */
 .dev-row{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid rgba(23,42,38,.1)}
 .dev-row:last-child{border-bottom:0}
-.dev-row .lab{font-weight:700}
-.dev-row .meta{font-family:"Space Mono",monospace;font-size:10px;color:var(--nori-soft)}
-.dev-row .dead{color:var(--ume);font-size:10px;font-family:"Space Mono",monospace}
-.dev-row .spacer{margin-left:auto}
+.dev-info{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;gap:1px}
+.dev-info .lab{font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dev-info .meta{font-family:"Space Mono",monospace;font-size:10px;color:var(--nori-soft)}
+.dev-info .dead{color:var(--ume);font-size:10px;font-family:"Space Mono",monospace}
+.dev-actions{display:flex;gap:6px;flex:none;align-items:center}
+.dev-actions .btn{margin:0}
 .switch{display:flex;align-items:center;gap:10px;padding:10px 0}
 .switch input{width:20px;height:20px;accent-color:var(--gogo)}
 select{font:inherit;border:2px solid var(--nori);border-radius:8px;padding:6px 10px;background:#fff}
 
 .tok-row{display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid rgba(23,42,38,.1);flex-wrap:wrap}
 .tok-row:last-child{border-bottom:0}
+.tok-row b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:40%}
+.tok-row .btn{flex:none;margin:0}
+#tokForm input{min-width:0}
 .token-reveal{font-family:"Space Mono",monospace;font-size:12px;background:#F4F7F5;border:1.5px dashed var(--nori-soft);border-radius:6px;padding:8px;word-break:break-all;margin-top:8px}
 
 /* toast */
@@ -147,6 +167,15 @@ select{font:inherit;border:2px solid var(--nori);border-radius:8px;padding:6px 1
 
 .banner{border:2px solid var(--tama);background:#FDF3DF;border-radius:10px;padding:10px 14px;font-size:13px;margin-top:12px}
 .banner.err{border-color:var(--ume);background:#FBE9E7}
+
+/* mobile: 16px inputs stop iOS focus auto-zoom; bigger touch targets */
+@media (max-width:600px){
+  .field input,.paste-dock textarea,#tokForm input,select{font-size:16px}
+}
+@media (pointer:coarse){
+  .btn.inline{padding:10px 16px}
+  .save-opt{padding:10px 6px}
+}
 
 @media (prefers-reduced-motion:reduce){
   *{animation-duration:.01ms !important;transition-duration:.01ms !important}

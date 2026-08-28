@@ -6,10 +6,14 @@
 //  - decryption failure still shows a generic notification — iOS revokes
 //    push permission if a push produces no notification (§5.5)
 
-import { decryptTextEnvelope, decryptFileMeta, decryptJson, deriveKmaster, detectTextKind, importIdentityPrivate } from "./js/crypto.js";
+import {
+  decryptTextEnvelope, decryptFileMeta, decryptJson, deriveKmaster, detectTextKind,
+  encryptFileEnvelope, encryptTextEnvelope, importIdentityPrivate,
+} from "./js/crypto.js";
+import { compressImage } from "./js/image.js";
 import { K, kvGet } from "./js/store.js";
 
-const SHELL_CACHE = "bentodrop-shell-v3";
+const SHELL_CACHE = "bentodrop-shell-v4";
 const SHELL = ["/", "/styles.css", "/js/app.js", "/js/crypto.js", "/js/api.js", "/js/store.js", "/js/image.js", "/js/wordlist.js", "/js/qr.js", "/js/qr-import.js", "/js/vendor/lean-qr.mjs", "/manifest.webmanifest"];
 
 self.addEventListener("install", (event) => {
@@ -26,8 +30,66 @@ self.addEventListener("activate", (event) => {
   })());
 });
 
+/**
+ * Android share sheet → BentoDrop (Web Share Target). The whole pipeline —
+ * compress, encrypt, upload, send — runs here in the service worker, so the
+ * app only flashes open on "/" with an 已送達 toast. Nothing plaintext ever
+ * leaves the device.
+ */
+async function shareTargetSend(form) {
+  const [token, entropy, userName, userId] = await Promise.all([
+    kvGet(K.DEVICE_TOKEN), kvGet(K.ENTROPY), kvGet(K.USER_NAME), kvGet(K.USER_ID),
+  ]);
+  if (!token || !entropy) throw new Error("not onboarded");
+  const kMaster = await deriveKmaster(entropy, userName);
+  const auth = { authorization: `Bearer ${token}`, "content-type": "application/json" };
+  const post = async (path, body) => {
+    const res = await fetch(path, { method: "POST", headers: auth, body: JSON.stringify(body) });
+    if (!res.ok) throw new Error(`${path} → ${res.status}`);
+    return res.json();
+  };
+
+  let sentAny = false;
+  for (const file of form.getAll("media")) {
+    if (!file || typeof file === "string" || file.size === 0) continue;
+    const prepared = await compressImage(file, {}); // OffscreenCanvas path works in SW
+    const { envelope, ciphertext } = await encryptFileEnvelope(
+      kMaster, userId, prepared.bytes, prepared.name, prepared.mime,
+    );
+    const up = await post("/api/upload-url", { msgId: envelope.id, size: ciphertext.byteLength });
+    const put = await fetch(up.url, { method: "PUT", body: ciphertext });
+    if (!put.ok) throw new Error(`upload → ${put.status}`);
+    await post("/api/send", { envelope });
+    sentAny = true;
+  }
+
+  const title = String(form.get("title") ?? "").trim();
+  const text = String(form.get("text") ?? "").trim();
+  const url = String(form.get("url") ?? "").trim();
+  let combined = text;
+  if (url && !combined.includes(url)) combined = combined ? `${combined}\n${url}` : url;
+  if (title && !combined.includes(title)) combined = combined ? `${title}\n${combined}` : title;
+  if (combined) {
+    await post("/api/send", { envelope: await encryptTextEnvelope(kMaster, combined) });
+    sentAny = true;
+  }
+  if (!sentAny) throw new Error("empty share");
+}
+
 self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
+  if (url.origin === location.origin && url.pathname === "/share-target" && event.request.method === "POST") {
+    event.respondWith((async () => {
+      try {
+        await shareTargetSend(await event.request.formData());
+        return Response.redirect("/?shared=sent", 303);
+      } catch (err) {
+        console.warn("share-target failed", err);
+        return Response.redirect("/?shared=fail", 303);
+      }
+    })());
+    return;
+  }
   if (event.request.method !== "GET" || url.origin !== location.origin || url.pathname.startsWith("/api/")) return;
   // Network-first for the shell; cache fallback for offline opens.
   event.respondWith((async () => {

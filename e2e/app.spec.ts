@@ -195,24 +195,59 @@ test("friends (§11): invite → claim → approve → cross-user encrypted send
   await b.context.close();
 });
 
-test("paste-to-send: direct by default, fills the composer when unchecked", async ({ browser, baseURL }) => {
+test("clipboard composer: grayed preview + 即送; typing flips to 送出; preview click edits", async ({ browser, baseURL }) => {
   const { context, page } = await newDeviceContext(browser, baseURL!, ["clipboard-read", "clipboard-write"]);
   await onboard(page, "paster");
 
-  await expect(page.locator("#pasteSendBtn")).toBeVisible();
-  await expect(page.locator("#pasteDirect")).toBeChecked(); // default on
-
+  // Clipboard has text → preview shows it grayed, the single button is 即送.
   await page.evaluate(() => navigator.clipboard.writeText("剪貼簿直送測試"));
-  await page.getByRole("button", { name: "貼上就送" }).click();
+  await page.reload();
+  await expect(page.locator("#clipPreview")).toBeVisible();
+  await expect(page.locator("#clipPreview")).toContainText("剪貼簿直送測試");
+  await expect(page.locator("#sendBtn")).toContainText("即送");
+  await page.locator("#sendBtn").click();
   await expect(page.locator("#sendStatus")).toContainText(/已送達|✓/);
+  await expect(page.locator("#clipPreview")).toBeHidden(); // just-sent content isn't re-offered
   await refreshInbox(page);
   await expect(page.locator(".mini", { hasText: "剪貼簿直送測試" })).toBeVisible();
 
-  // Unchecked → paste only fills the composer.
-  await page.locator("#pasteDirect").uncheck();
+  // Typing overrides the clipboard state — the button becomes 送出.
+  await page.locator("#composeText").fill("手動輸入的內容");
+  await expect(page.locator("#sendBtn")).toHaveText("送出");
+  await page.locator("#sendBtn").click();
+  await expect(page.locator("#sendStatus")).toContainText(/已送達|✓/);
+
+  // Clicking the preview moves the text into the composer for editing.
   await page.evaluate(() => navigator.clipboard.writeText("先別送出這段"));
-  await page.getByRole("button", { name: "貼上就送" }).click();
+  await page.reload();
+  await expect(page.locator("#clipPreview")).toBeVisible();
+  await page.locator("#clipPreview").click();
   await expect(page.locator("#composeText")).toHaveValue("先別送出這段");
+  await expect(page.locator("#sendBtn")).toHaveText("送出");
+  await context.close();
+});
+
+test("clipboard composer: image clipboard shows a thumbnail and 即送 sends it as a file", async ({ browser, baseURL }) => {
+  const { context, page } = await newDeviceContext(browser, baseURL!, ["clipboard-read", "clipboard-write"]);
+  await onboard(page, "imgpaster");
+
+  await page.evaluate(async () => {
+    const canvas = document.createElement("canvas");
+    canvas.width = 48;
+    canvas.height = 48;
+    const ctx = canvas.getContext("2d")!;
+    ctx.fillStyle = "#00C2A8";
+    ctx.fillRect(0, 0, 48, 48);
+    const blob: Blob = await new Promise((r) => canvas.toBlob((b) => r(b!), "image/png"));
+    await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
+  });
+  await page.reload();
+  await expect(page.locator("#clipPreview img")).toBeVisible();
+  await expect(page.locator("#sendBtn")).toContainText("即送");
+  await page.locator("#sendBtn").click();
+  await expect(page.locator("#sendStatus")).toContainText(/已送達|✓/);
+  await refreshInbox(page);
+  await expect(page.locator(".mini.img", { hasText: "clipboard" })).toBeVisible();
   await context.close();
 });
 
@@ -243,6 +278,54 @@ test("recovery QR: export from backup, import a photo on restore (§6.5.1)", asy
   await b.page.getByRole("button", { name: "還原" }).click();
   await expect(b.page.locator(".paste-dock")).toBeVisible();
   await b.context.close();
+});
+
+test("share target: the SW encrypts and sends shared text and images headlessly", async ({ browser, baseURL }) => {
+  const { context, page } = await newDeviceContext(browser, baseURL!);
+  await onboard(page, "sharer");
+  await page.evaluate(() => navigator.serviceWorker.ready);
+  await page.reload(); // ensure the page is SW-controlled so fetch() hits the handler
+
+  // Text + URL share (what Android posts to /share-target).
+  const textResult = await page.evaluate(async () => {
+    const fd = new FormData();
+    fd.set("title", "");
+    fd.set("text", "分享來的文章");
+    fd.set("url", "https://example.com/shared-article");
+    const res = await fetch("/share-target", { method: "POST", body: fd });
+    return res.url;
+  });
+  expect(textResult).toContain("shared=sent");
+
+  // Image share.
+  const imgResult = await page.evaluate(async () => {
+    const canvas = document.createElement("canvas");
+    canvas.width = 32;
+    canvas.height = 32;
+    const ctx = canvas.getContext("2d")!;
+    ctx.fillStyle = "#E0483A";
+    ctx.fillRect(0, 0, 32, 32);
+    const blob: Blob = await new Promise((r) => canvas.toBlob((b) => r(b!), "image/png"));
+    const fd = new FormData();
+    fd.append("media", new File([blob], "shared-photo.png", { type: "image/png" }));
+    const res = await fetch("/share-target", { method: "POST", body: fd });
+    return res.url;
+  });
+  expect(imgResult).toContain("shared=sent");
+
+  await refreshInbox(page);
+  const textCard = page.locator(".mini", { hasText: "分享來的文章" });
+  await expect(textCard).toBeVisible();
+  await expect(textCard).toContainText("example.com/shared-article");
+  await expect(page.locator(".mini.img", { hasText: "shared-photo" })).toBeVisible();
+
+  // An empty share fails gracefully.
+  const emptyResult = await page.evaluate(async () => {
+    const res = await fetch("/share-target", { method: "POST", body: new FormData() });
+    return res.url;
+  });
+  expect(emptyResult).toContain("shared=fail");
+  await context.close();
 });
 
 test("device rename: current device and peers, from settings", async ({ browser, baseURL }) => {
