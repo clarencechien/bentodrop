@@ -36,6 +36,8 @@ export const api = {
   deleteMessage: (id) => call("DELETE", `/api/messages/${id}`),
   clearMessages: () => call("DELETE", "/api/messages"),
   uploadUrl: (msgId, size) => call("POST", "/api/upload-url", { msgId, size }),
+  uploadIntent: (envelope, to) => call("POST", "/api/upload-intent", to ? { envelope, to } : { envelope }),
+  diagProbe: (targetDeviceId) => call("POST", "/api/diag/probe", { targetDeviceId }),
   downloadUrl: (key) => call("GET", `/api/download-url?key=${encodeURIComponent(key)}`),
   pairCreate: () => call("POST", "/api/pair/create"),
   pairClaim: (pairId, code, pubkeyJwk, label) =>

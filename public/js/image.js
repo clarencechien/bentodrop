@@ -8,6 +8,42 @@ const TARGET_BYTES = 1.5 * 1024 * 1024; // maxSizeMB 1.5
 const MAX_EDGE = 2048;                  // 長邊 2048
 const INITIAL_QUALITY = 0.82;
 
+/**
+ * Tiny thumbnail for the push payload (README 優化 #5): long edge ≤96px,
+ * WebP, quality stepped down until it fits `maxBytes`. Returns null when the
+ * source can't be decoded or nothing fits the budget — callers just skip
+ * the thumb, never fail the send.
+ */
+export async function makeThumb(bytes, mime, maxBytes = 1200) {
+  let bitmap;
+  try {
+    bitmap = await createImageBitmap(new Blob([bytes], { type: mime }));
+  } catch {
+    return null;
+  }
+  try {
+    const scale = Math.min(1, 96 / Math.max(bitmap.width, bitmap.height));
+    const w = Math.max(1, Math.round(bitmap.width * scale));
+    const h = Math.max(1, Math.round(bitmap.height * scale));
+    const canvas = typeof OffscreenCanvas !== "undefined"
+      ? new OffscreenCanvas(w, h)
+      : Object.assign(document.createElement("canvas"), { width: w, height: h });
+    canvas.width = w;
+    canvas.height = h;
+    canvas.getContext("2d").drawImage(bitmap, 0, 0, w, h);
+    const toBlob = (q) => canvas.convertToBlob
+      ? canvas.convertToBlob({ type: "image/webp", quality: q })
+      : new Promise((res) => canvas.toBlob(res, "image/webp", q));
+    for (const q of [0.5, 0.35, 0.2]) {
+      const blob = await toBlob(q);
+      if (blob.size <= maxBytes) return new Uint8Array(await blob.arrayBuffer());
+    }
+    return null;
+  } finally {
+    bitmap.close?.();
+  }
+}
+
 export function isImage(file) {
   return /^image\//.test(file.type);
 }

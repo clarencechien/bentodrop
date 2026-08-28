@@ -280,6 +280,80 @@ test("recovery QR: export from backup, import a photo on restore (§6.5.1)", asy
   await b.context.close();
 });
 
+test("inbox first paint comes from cache when the server is unreachable", async ({ browser, baseURL }) => {
+  const { context, page } = await newDeviceContext(browser, baseURL!);
+  await onboard(page, "cacher");
+  await sendText(page, "快取測試訊息");
+  await refreshInbox(page);
+  await expect(page.locator(".mini", { hasText: "快取測試訊息" })).toBeVisible();
+
+  // Server goes away → reload still paints the cached (ciphertext) listing.
+  await context.route("**/api/messages", (route) => route.abort());
+  await page.reload();
+  await expect(page.locator(".mini", { hasText: "快取測試訊息" })).toBeVisible();
+  await context.unroute("**/api/messages");
+  await context.close();
+});
+
+test("file detail: prefetched bytes render instantly; encrypted thumbnail previews otherwise", async ({ browser, baseURL }) => {
+  test.setTimeout(120_000);
+  const { context, page } = await newDeviceContext(browser, baseURL!);
+  await onboard(page, "prefetcher");
+
+  // Send a small solid-colour image — compresses tiny, so its encrypted
+  // thumbnail comfortably fits the push budget and is retained.
+  const pngBytes = await page.evaluate(async () => {
+    const c = document.createElement("canvas");
+    c.width = 64;
+    c.height = 64;
+    const g = c.getContext("2d")!;
+    g.fillStyle = "#00C2A8";
+    g.fillRect(0, 0, 64, 64);
+    const blob: Blob = await new Promise((r) => c.toBlob((b) => r(b!), "image/png"));
+    return Array.from(new Uint8Array(await blob.arrayBuffer()));
+  });
+  await page.locator("#fileInput").setInputFiles({
+    name: "photo.png",
+    mimeType: "image/png",
+    buffer: Buffer.from(pngBytes),
+  });
+  await expect(page.locator("#sendStatus")).toContainText(/已送達|✓/);
+  await refreshInbox(page);
+  await expect(page.locator(".mini.img")).toBeVisible();
+
+  // Simulate what the SW's push prefetch does: park the ciphertext in the cache.
+  const msgId = await page.evaluate(async () => {
+    const { api } = await import("/js/api.js");
+    const { messages } = await api.messages();
+    const m = messages.find((x: any) => x.kind === "file");
+    const { url } = await api.downloadUrl(m.envelope.obj);
+    const cipher = await (await fetch(url)).arrayBuffer();
+    const cache = await caches.open("bentodrop-prefetch-v1");
+    await cache.put(`/__prefetch/${m.msgId}`, new Response(cipher, {
+      headers: { "content-type": "application/octet-stream", "x-fetched-at": String(Date.now()) },
+    }));
+    return m.msgId as string;
+  });
+
+  // Prefetched → opening shows the full image immediately, no download button.
+  await page.reload();
+  await page.locator(".mini.img").click();
+  await expect(page.locator(".modal .detail-img")).toBeVisible();
+  await expect(page.locator(".modal").getByRole("button", { name: "下載並解密" })).toHaveCount(0);
+  await page.locator(".modal-back").click({ position: { x: 5, y: 5 } });
+
+  // Without the prefetch entry, the encrypted thumbnail previews instantly
+  // and the manual download button is back.
+  await page.evaluate(async (id) => {
+    const cache = await caches.open("bentodrop-prefetch-v1");
+    await cache.delete(`/__prefetch/${id}`);
+  }, msgId);
+  await page.locator(".mini.img").click();
+  await expect(page.locator(".modal .detail-thumb")).toBeVisible();
+  await expect(page.locator(".modal").getByRole("button", { name: "下載並解密" })).toBeVisible();
+  await context.close();
+});
+
 test("share target: the SW encrypts and sends shared text and images headlessly", async ({ browser, baseURL }) => {
   const { context, page } = await newDeviceContext(browser, baseURL!);
   await onboard(page, "sharer");

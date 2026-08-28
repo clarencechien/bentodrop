@@ -134,10 +134,51 @@ async function measureCompression() {
 }
 
 /**
+ * Push-delivery probe (handoff §2.3, README 優化 #6): this device → push →
+ * target device's SW → pong → push → back here. The whole loop is timed on
+ * THIS device's clock; one-way delivery ≈ RTT / 2. Needs a second
+ * subscribed device, and pops a couple of probe notifications on it.
+ */
+async function measurePushProbe(targetDeviceId, runs = 3) {
+  if (!("serviceWorker" in navigator) || !navigator.serviceWorker.controller) {
+    return { error: "此頁面尚未由 Service Worker 控制,重新整理後再試" };
+  }
+  const samples = [];
+  for (let i = 0; i < runs; i++) {
+    const rtt = await new Promise((resolve) => {
+      let probeId = null;
+      let settled = false;
+      const finish = (v) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        navigator.serviceWorker.removeEventListener("message", onMsg);
+        resolve(v);
+      };
+      const onMsg = (ev) => {
+        if (ev.data?.t === "probe-pong" && ev.data.probeId === probeId) finish(performance.now() - t0);
+      };
+      const timer = setTimeout(() => finish(null), 15000);
+      navigator.serviceWorker.addEventListener("message", onMsg);
+      const t0 = performance.now();
+      apiJson("/api/diag/probe", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ targetDeviceId }),
+      }).then((res) => { probeId = res.probeId; }).catch(() => finish(null));
+    });
+    samples.push(rtt);
+  }
+  const ok = samples.filter((x) => x !== null);
+  if (!ok.length) return { error: "探針逾時 — 對方裝置可能離線或通知被關閉" };
+  return { rttMs: r(median(ok)), oneWayMs: r(median(ok) / 2), runs: ok.length, total: runs };
+}
+
+/**
  * Run the whole suite. onStep(label) is called as each stage starts;
  * onStepDone(label) when it finishes — the UI renders them as a checklist.
  */
-export async function runDiagnostics(kMaster, userId, { onStep = () => {}, onStepDone = () => {} } = {}) {
+export async function runDiagnostics(kMaster, userId, { onStep = () => {}, onStepDone = () => {}, probeTargetId = null } = {}) {
   const result = { startedAt: new Date().toISOString(), ua: navigator.userAgent, sizes: [] };
 
   onStep("伺服器環境(colo / R2 / D1)");
@@ -180,6 +221,12 @@ export async function runDiagnostics(kMaster, userId, { onStep = () => {}, onSte
     result.compressMs = null; // 標「未測量」,不要補一個看起來合理的數字
   }
   onStepDone("圖片壓縮(4000×3000 → 2048 WebP)");
+
+  if (probeTargetId) {
+    onStep("推送探針(3 次往返,對方會跳通知)");
+    result.pushProbe = await measurePushProbe(probeTargetId);
+    onStepDone("推送探針(3 次往返,對方會跳通知)");
+  }
 
   result.conclusions = buildConclusions(result);
   return result;
@@ -240,6 +287,12 @@ export function formatReport(result) {
     );
   }
   lines.push(`圖片壓縮(4000×3000 → 2048 WebP): ${result.compressMs === null ? "未測量" : `${result.compressMs} ms`}`);
-  lines.push("推送送達時間: 未測量(需第二台裝置與時鐘同步,見 handoff §2.3)");
+  if (result.pushProbe && !result.pushProbe.error) {
+    lines.push(`推送往返(本機→對方→本機): ${result.pushProbe.rttMs} ms → 單程送達估計 ~${result.pushProbe.oneWayMs} ms(${result.pushProbe.runs}/${result.pushProbe.total} 次成功,中位數)`);
+  } else if (result.pushProbe?.error) {
+    lines.push(`推送送達時間: 測量失敗 — ${result.pushProbe.error}`);
+  } else {
+    lines.push("推送送達時間: 未測量(需第二台已訂閱推送的裝置)");
+  }
   return lines.join("\n");
 }

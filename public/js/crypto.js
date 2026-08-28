@@ -203,12 +203,13 @@ export async function encryptTextEnvelopeFor(peerPubJwk, text, now = Date.now())
 }
 
 /** Encrypt a file for a CONTACT (§11). Uploads still go to the SENDER's prefix. */
-export async function encryptFileEnvelopeFor(peerPubJwk, senderUserId, bytes, name, mime, now = Date.now()) {
+export async function encryptFileEnvelopeFor(peerPubJwk, senderUserId, bytes, name, mime, thumbBytes = null, now = Date.now()) {
   const cekRaw = crypto.getRandomValues(new Uint8Array(32));
   const cek = await subtle.importKey("raw", cekRaw, "AES-GCM", false, ["encrypt"]);
   const id = ulid(now);
   const body = await aesEncrypt(cek, bytes);
   const meta = await aesEncrypt(cek, te.encode(JSON.stringify({ name, mime })));
+  const thumb = thumbBytes ? await aesEncrypt(cek, thumbBytes) : null;
   const ciphertext = unb64u(body.ct);
   return {
     envelope: {
@@ -217,6 +218,7 @@ export async function encryptFileEnvelopeFor(peerPubJwk, senderUserId, bytes, na
       kind: "file",
       wrap: await wrapCekForPeer(peerPubJwk, cekRaw),
       meta: { iv: meta.iv, ct: meta.ct },
+      ...(thumb ? { thumb } : {}),
       iv: body.iv,
       ct: null,
       obj: `u/${senderUserId}/inbox/${id}`,
@@ -230,14 +232,16 @@ export async function encryptFileEnvelopeFor(peerPubJwk, senderUserId, bytes, na
 /**
  * Encrypt a file (§3.2 path). Returns { envelope, ciphertext } — the caller
  * uploads `ciphertext` to the signed URL, then POSTs the envelope to /send.
- * File name and MIME type are encrypted into meta (§5.3).
+ * File name and MIME type are encrypted into meta (§5.3). `thumbBytes`
+ * (optional) rides along CEK-encrypted so notifications can preview it.
  */
-export async function encryptFileEnvelope(kMaster, userId, bytes, name, mime, now = Date.now()) {
+export async function encryptFileEnvelope(kMaster, userId, bytes, name, mime, thumbBytes = null, now = Date.now()) {
   const cekRaw = crypto.getRandomValues(new Uint8Array(32));
   const cek = await subtle.importKey("raw", cekRaw, "AES-GCM", false, ["encrypt"]);
   const id = ulid(now);
   const body = await aesEncrypt(cek, bytes);
   const meta = await aesEncrypt(cek, te.encode(JSON.stringify({ name, mime })));
+  const thumb = thumbBytes ? await aesEncrypt(cek, thumbBytes) : null;
   const ciphertext = unb64u(body.ct);
   return {
     envelope: {
@@ -246,6 +250,7 @@ export async function encryptFileEnvelope(kMaster, userId, bytes, name, mime, no
       kind: "file",
       wrap: await makeWrap(kMaster, cekRaw),
       meta: { iv: meta.iv, ct: meta.ct },
+      ...(thumb ? { thumb } : {}),
       iv: body.iv,
       ct: null,
       obj: `u/${userId}/inbox/${id}`,
@@ -261,6 +266,13 @@ export async function decryptTextEnvelope(kMaster, envelope) {
   if (envelope.plain) return envelope.text; // §12.4 plaintext mode — nothing to decrypt
   const cek = await openWrap(kMaster, envelope.wrap);
   return td.decode(await aesDecrypt(cek, envelope.iv, envelope.ct));
+}
+
+/** Decrypt an envelope's thumbnail → bytes (or null when absent). */
+export async function decryptThumb(keys, envelope) {
+  if (!envelope.thumb) return null;
+  const cek = await openWrap(keys, envelope.wrap);
+  return aesDecrypt(cek, envelope.thumb.iv, envelope.thumb.ct);
 }
 
 /** Decrypt file metadata → { name, mime }. */

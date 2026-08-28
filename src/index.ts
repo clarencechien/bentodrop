@@ -6,14 +6,14 @@ import { authApiToken, authDevice } from "./auth";
 import { handleRegister } from "./routes/register";
 import { pairApprove, pairClaim, pairCreate, pairFinish, pairStatus } from "./routes/pairing";
 import { clearMessages, deleteMessage, handleSend, listMessages, markRead } from "./routes/messages";
-import { createDownloadUrl, createUploadUrl, handleObject } from "./routes/objects";
+import { createDownloadUrl, createUploadIntent, createUploadUrl, handleObject } from "./routes/objects";
 import { createToken, handleApiPush, listTokens, pushPubkey, revokeToken, updateSettings } from "./routes/tokens";
 import {
   contactApprove, contactClaim, contactInvite, contactInviteStatus,
   deleteContact, getIdentity, listContacts, renameContact, setIdentity,
 } from "./routes/contacts";
 import { deleteDevice, handleMe, handleSubscribe, handleTestPush, renameDevice } from "./routes/devices";
-import { diagDelete, diagEcho, diagEnv, diagUploadUrl } from "./routes/diag";
+import { diagDelete, diagEcho, diagEnv, diagProbe, diagProbePong, diagUploadUrl } from "./routes/diag";
 import { cleanupExpired } from "./cron";
 
 const DEPLOY_HINT =
@@ -81,6 +81,7 @@ async function handleApi(req: Request, env: Env, path: string): Promise<Response
   if (path === "/api/messages" && method === "GET") return listMessages(env, device);
   if (path === "/api/messages" && method === "DELETE") return clearMessages(env, device);
   if (path === "/api/upload-url" && method === "POST") return createUploadUrl(req, env, device);
+  if (path === "/api/upload-intent" && method === "POST") return createUploadIntent(req, env, device);
   if (path === "/api/download-url" && method === "GET") return createDownloadUrl(req, env, device);
   if (path === "/api/pair/create" && method === "POST") return pairCreate(env, device);
   if (path === "/api/tokens" && method === "POST") return createToken(req, env, device);
@@ -96,6 +97,8 @@ async function handleApi(req: Request, env: Env, path: string): Promise<Response
   if (path === "/api/diag/upload-url" && method === "POST") return diagUploadUrl(req, env, device);
   if (path === "/api/diag/object" && method === "DELETE") return diagDelete(req, env, device);
   if (path === "/api/diag/echo" && method === "POST") return diagEcho(req, env, device);
+  if (path === "/api/diag/probe" && method === "POST") return diagProbe(req, env, device);
+  if (path === "/api/diag/probe-pong" && method === "POST") return diagProbePong(req, env, device);
 
   let m: RegExpExecArray | null;
   if ((m = /^\/api\/messages\/([A-Za-z0-9_-]+)\/read$/.exec(path)) && method === "POST") {

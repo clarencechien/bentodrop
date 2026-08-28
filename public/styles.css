@@ -115,6 +115,7 @@ main{padding:26px 18px 80px}
 .detail-body{font-size:15px;white-space:pre-wrap;word-break:break-word;background:#F4F7F5;border-radius:8px;padding:14px;margin-top:12px}
 .detail-meta{font-family:"Space Mono",monospace;font-size:10px;letter-spacing:.08em;color:var(--nori-soft);margin-top:12px}
 .detail-img{max-width:100%;border-radius:8px;border:2px solid var(--nori);margin-top:12px}
+.detail-thumb{display:block;max-width:160px;border-radius:8px;border:1.5px dashed var(--nori-soft);margin-top:12px;filter:saturate(.9)}
 .url-list{list-style:none;margin-top:8px}
 .url-list a{color:var(--gogo-deep);word-break:break-all}
 
