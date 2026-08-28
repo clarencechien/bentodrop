@@ -138,6 +138,99 @@ async function ensurePush({ interactive = false } = {}) {
   }
 }
 
+// ── install-as-PWA guidance ──────────────────────────────────────────
+let deferredInstallPrompt = null;
+window.addEventListener("beforeinstallprompt", (e) => {
+  e.preventDefault();
+  deferredInstallPrompt = e;
+  document.getElementById("installBtn")?.replaceChildren("安裝");
+});
+
+function isStandalone() {
+  return matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
+}
+
+function platformInstallSteps() {
+  const ua = navigator.userAgent;
+  if (/iPhone|iPad/.test(ua)) {
+    return {
+      title: "加入 iPhone / iPad 主畫面",
+      steps: [
+        "用 Safari 開啟這個網站",
+        "按底部中間的「分享」鈕(方框加向上箭頭)",
+        "往下捲,點「加入主畫面」→「加入」",
+        "之後一律從主畫面圖示開啟,通知才收得到",
+      ],
+      note: "iOS 一定要加入主畫面才有推送通知,在 Safari 分頁裡開是收不到的。",
+    };
+  }
+  if (/Android/.test(ua)) {
+    return {
+      title: "安裝到 Android",
+      steps: [
+        "用 Chrome 開啟這個網站",
+        "按右上「⋮」選單 → 「安裝應用程式」",
+        "安裝後從主畫面開啟,並在設定按「啟用本機通知」",
+        "之後任何 App 按「分享」都能直接選 BentoDrop",
+      ],
+    };
+  }
+  return {
+    title: "安裝到電腦",
+    steps: [
+      "用 Chrome 或 Edge 開啟這個網站",
+      "點網址列右側的安裝圖示(螢幕加向下箭頭),或「⋮」→「安裝」",
+      "安裝後它就是一個獨立視窗的 App",
+    ],
+  };
+}
+
+function showInstallGuide() {
+  const guide = platformInstallSteps();
+  const box = el(`
+    <div>
+      <h3>${esc(guide.title)}</h3>
+      <ol class="install-steps">${guide.steps.map((s) => `<li>${esc(s)}</li>`).join("")}</ol>
+      ${guide.note ? `<div class="banner">${esc(guide.note)}</div>` : ""}
+      <a class="btn ghost" href="/landing#install" style="text-decoration:none;text-align:center">看完整教學</a>
+    </div>`);
+  modal(box);
+}
+
+/** Banner above the inbox (only when NOT already running as an installed app). */
+async function installBanner() {
+  if (isStandalone()) return null;
+  if (await kvGet(K.INSTALL_DISMISSED)) return null;
+  const banner = el(`
+    <div class="install-banner" id="installBanner">
+      <i class="ib-ico"></i>
+      <div class="ib-text">
+        <b>把 BentoDrop 裝成 App</b>
+        <span>通知更可靠${/Android/.test(navigator.userAgent) ? ",分享面板也能直接選它" : ""}</span>
+      </div>
+      <button class="btn inline" id="installBtn" type="button">${deferredInstallPrompt ? "安裝" : "怎麼裝?"}</button>
+      <button class="ib-close" type="button" aria-label="關閉安裝提示">×</button>
+    </div>`);
+  banner.querySelector("#installBtn").onclick = async () => {
+    if (deferredInstallPrompt) {
+      deferredInstallPrompt.prompt();
+      const { outcome } = await deferredInstallPrompt.userChoice;
+      deferredInstallPrompt = null;
+      if (outcome === "accepted") {
+        banner.remove();
+        toast("已安裝 ✓ 之後從 App 圖示開啟");
+      }
+      return;
+    }
+    showInstallGuide();
+  };
+  banner.querySelector(".ib-close").onclick = async () => {
+    await kvSet(K.INSTALL_DISMISSED, Date.now());
+    banner.remove();
+  };
+  return banner;
+}
+
 // ── nav ───────────────────────────────────────────────────────────────
 function setNav(loggedIn) {
   $nav.replaceChildren();
@@ -304,6 +397,11 @@ function renderInbox() {
       <div id="msgList"></div>
     </div>`);
   $app.replaceChildren(root);
+
+  // 收件匣上方:not running as an installed app → offer to install (§9 教學).
+  installBanner().then((banner) => {
+    if (banner) root.querySelector(".inbox-head").before(banner);
+  });
 
   // Recipient picker: my own devices (default) or a contact (§11).
   const $target = root.querySelector("#sendTarget");

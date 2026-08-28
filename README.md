@@ -126,6 +126,12 @@ e2e/                    Playwright E2E(11)
 scripts/                setup / gen-vapid / gen-icons / e2e-server
 ```
 
+## 安裝與教學
+
+- **Landing page / 使用手冊**:`/landing`(沿用 mockup 視覺,只介紹已實作的功能;「開始使用」導回 `/`)。含 Android / iOS / 桌面三平台的安裝步驟,iOS 特別強調必須「加入主畫面」才有推送(§9)。
+- **App 內安裝引導**:非 PWA 模式開啟時,收件匣上方顯示安裝橫幅 — 支援 `beforeinstallprompt` 的環境一鍵安裝;其他(含 iOS)按「怎麼裝?」彈出對應平台的簡化步驟。可關閉,每台裝置記住。
+- Google Fonts 以非阻塞方式載入(`media="print"` onload 切換):字型 CDN 慢或不可達時,App 照常啟動、以系統字型顯示。
+
 ## 分享捷徑(Android)
 
 安裝 PWA 後,BentoDrop 會出現在 Android 的系統分享面板(Web Share Target)。從任何 App 分享文字、連結或圖片 → 選 BentoDrop → **Service Worker 直接在背景完成壓縮、加密、上傳、送出**,畫面只會閃一下「分享內容已加密送達 ✓」,不需要在 App 裡再操作。
