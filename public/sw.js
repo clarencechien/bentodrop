@@ -7,13 +7,13 @@
 //    push permission if a push produces no notification (§5.5)
 
 import {
-  b64u, decryptTextEnvelope, decryptFileMeta, decryptJson, decryptThumb, deriveKmaster, detectTextKind,
+  androidChromeIntent, b64u, decryptTextEnvelope, decryptFileMeta, decryptJson, decryptThumb, deriveKmaster, detectTextKind,
   encryptFileEnvelope, encryptTextEnvelope, importIdentityPrivate,
 } from "./js/crypto.js";
 import { compressImage } from "./js/image.js";
 import { K, kvGet } from "./js/store.js";
 
-const SHELL_CACHE = "bentodrop-shell-v5";
+const SHELL_CACHE = "bentodrop-shell-v6";
 const PREFETCH_CACHE = "bentodrop-prefetch-v1";
 const PREFETCH_MAX_BYTES = 5 * 1024 * 1024;
 const PREFETCH_CELLULAR_MAX_BYTES = 1.5 * 1024 * 1024; // respect mobile data
@@ -292,6 +292,18 @@ self.addEventListener("notificationclick", (event) => {
     // 開啟 action: the user explicitly tapped it, so navigating to the
     // (https-only, §7.2.1) URL is their click — not auto-navigation.
     if (action === "open-url" && data.url && data.url.startsWith("https://")) {
+      // On Android an installed PWA's openWindow lands out-of-scope URLs in
+      // a Custom-Tab overlay; try the intent:// form first so the link opens
+      // in full Chrome. Rejected/unsupported → plain URL as before.
+      if (/Android/.test(navigator.userAgent)) {
+        const intent = androidChromeIntent(data.url);
+        if (intent) {
+          try {
+            await self.clients.openWindow(intent);
+            return;
+          } catch { /* fall through to the plain URL */ }
+        }
+      }
       await self.clients.openWindow(data.url);
       return;
     }
