@@ -445,6 +445,11 @@ test("landing page: manual at /landing, 開始使用 leads back to the app", asy
   await expect(page.getByRole("heading", { name: "裝成 App,通知才可靠" })).toBeVisible();
   await expect(page.getByText("加入主畫面", { exact: false }).first()).toBeVisible(); // iOS steps present
 
+  // One-click install row exists but stays hidden until the browser offers
+  // a real install prompt; the hero button falls back to the manual anchor.
+  await expect(page.locator("#oneClickRow")).toBeHidden();
+  await expect(page.locator(".hero-cta a.js-install")).toHaveAttribute("href", "#install");
+
   // 開始使用 → the app itself (onboarding for a fresh browser).
   await page.getByRole("link", { name: "開始使用 →" }).first().click();
   await expect(page).toHaveURL(`${baseURL}/`);
@@ -454,6 +459,12 @@ test("landing page: manual at /landing, 開始使用 leads back to the app", asy
 
 test("install banner: shows in a browser tab, opens platform steps, dismiss persists", async ({ browser, baseURL }) => {
   const { context, page } = await newDeviceContext(browser, baseURL!);
+
+  // Visible on the very first screen (onboarding), before any account exists.
+  await page.goto("/");
+  await expect(page.getByRole("heading", { name: "你叫什麼名字?" })).toBeVisible();
+  await expect(page.locator("#installBanner")).toBeVisible();
+
   await onboard(page, "installer");
 
   // Not standalone → the banner sits above the inbox.

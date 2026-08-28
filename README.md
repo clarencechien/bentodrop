@@ -136,6 +136,8 @@ scripts/                setup / gen-vapid / gen-icons / e2e-server
 
 安裝 PWA 後,BentoDrop 會出現在 Android 的系統分享面板(Web Share Target)。從任何 App 分享文字、連結或圖片 → 選 BentoDrop → **Service Worker 直接在背景完成壓縮、加密、上傳、送出**,畫面只會閃一下「分享內容已加密送達 ✓」,不需要在 App 裡再操作。
 
+`/share-target` 有 CSRF 防護:SW 以瀏覽器控制、網頁無法偽造的 `Sec-Fetch-Site` header 驗證來源(真實分享是 `none`、App 內是 `same-origin`),跨站網頁自動送出的表單(`cross-site`)一律拒絕,不會動用裝置憑證。
+
 iOS 的 PWA 不支援 share target(Safari 限制)。替代方案:用「捷徑」App 建一個分享表單捷徑,對 `/api/push` 發 POST(需 API token;捷徑做不了 ECDH,只能走明文模式,內容會標示「未加密」且 24 小時後刪除)。
 
 ## CLI:腳本推送(§12.3)

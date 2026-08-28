@@ -278,6 +278,14 @@ function renderOnboarding(next) {
   };
   document.getElementById("obJoin").onclick = () => renderPairJoin(null);
   document.getElementById("obRestore").onclick = () => renderRestore();
+  // First screen a new visitor sees — offer the one-tap install here too.
+  installBanner().then((banner) => {
+    if (banner) {
+      banner.style.maxWidth = "440px";
+      banner.style.margin = "14px auto 0";
+      $app.append(banner);
+    }
+  });
 }
 
 async function onboardNewUser(userName, entropy = C.generateEntropy()) {
