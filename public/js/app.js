@@ -1716,6 +1716,25 @@ async function boot() {
       console.warn("SW registration failed", err);
     });
     navigator.serviceWorker.addEventListener("message", async (e) => {
+      // Notification「複製」action: the SW hands us the text; the freshly
+      // focused document may write the clipboard on Chromium. Whatever the
+      // outcome, the message detail opens with its manual copy button
+      // (§7.2: auto-copy is attempted, never relied on).
+      if (e.data?.t === "copy-msg") {
+        let copied = false;
+        if (typeof e.data.text === "string" && navigator.clipboard?.writeText) {
+          try {
+            await navigator.clipboard.writeText(e.data.text);
+            copied = true;
+          } catch { /* fall through to the manual button */ }
+        }
+        await refreshMessages().catch(() => {});
+        renderInbox();
+        const m = state.msgs.find((x) => x.msgId === e.data.msgId);
+        if (m) openDetail(m);
+        toast(copied ? "已複製 ✓" : "無法自動複製,按下方的複製按鈕", !copied);
+        return;
+      }
       // notificationclick → open the message; the detail view carries the
       // real copy button (§7.2 — auto-copy without user activation is a lie)
       if (e.data?.t === "open-msg") {

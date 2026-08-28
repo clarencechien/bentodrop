@@ -170,7 +170,7 @@ async function measurePushProbe(targetDeviceId, runs = 3) {
     samples.push(rtt);
   }
   const ok = samples.filter((x) => x !== null);
-  if (!ok.length) return { error: "探針逾時 — 對方裝置可能離線或通知被關閉" };
+  if (!ok.length) return { error: "探針逾時 — 對方裝置可能離線、通知被關閉,或它的 App 尚未重開到最新版(兩台都重開一次再試)" };
   return { rttMs: r(median(ok)), oneWayMs: r(median(ok) / 2), runs: ok.length, total: runs };
 }
 
