@@ -14,6 +14,7 @@ export async function cleanupExpired(env: Env, now = Date.now()): Promise<{ mess
   ).bind(now).all();
 
   const diag = await cleanupDiagObjects(env, now);
+  await env.DB.prepare("DELETE FROM upload_intents WHERE expires_at <= ?").bind(now - 3600_000).run();
 
   return { messages: rows.results?.length ?? 0, pairings: pairings.results?.length ?? 0, diag };
 }

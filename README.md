@@ -166,16 +166,16 @@ scripts/                deploy(零設定部署)/ gen-vapid / gen-icons / e2e-ser
 2. 每次 API 呼叫付 ~200ms 台美 RTT;小訊息的耗時幾乎全是 round trip 疊加
 3. **WebRTC 暫不做**:1.5–2.5s 屬可用範圍;更便宜的優化排在前面(見下方 TODO)。若日後 ISP 路由改善或做了預取仍嫌慢,再重開此題
 
-### 優化 TODO(依實測數據排出優先序)
+### 優化(依實測數據排序 — 前六項已完成)
 
 文字路徑已是架構最優(內容在推送封包內,接收端零下載、無可省往返),以下全部針對**檔案路徑**與**首屏**:
 
-- [ ] **檔案背景預取**(體感 −0.8s,最大的一項):push 到達時 SW 直接抓密文進 Cache API,點開即解密顯示。註記:考慮只在 WiFi 預取或設大小上限,尊重行動流量
-- [ ] **合併上傳流程省一次 RTT**(−230ms):現在是 簽名→PUT→回報 三次往返;把 envelope 隨簽名請求先交給 Worker,PUT 完成即自動入列+推送,3 RTT 變 2 RTT
-- [ ] **收件匣首屏快取**(首屏 −230ms):訊息清單存 IndexedDB,開 app 先渲染上次的清單再背景刷新(密文本來就在本機能解)
-- [ ] **圖片壓縮移到 Web Worker**(不變快但不卡 UI):Pixel 實測壓縮 315ms 佔住主執行緒;spec §4.4 原本就建議 `useWebWorker`
-- [ ] **檔案通知附加密縮圖**(通知/收件匣立即有預覽):壓一張 ≤2KB 的縮圖一併加密塞進 push payload,大圖仍走 R2
-- [ ] **推送送達時間探針**(補上「未測量」):handoff §2.3 的雙裝置 NTP 式 RTT/2 測法,量 FCM 投遞那一段
+- [x] **檔案背景預取**(體感 −0.8s):push 到達時 SW 抓密文進 Cache API(≤5MB;行動網路 ≤1.5MB),點開即解密顯示;刪除訊息同步清快取,快取上限 20 筆 LRU
+- [x] **合併上傳流程省一次 RTT**(−230ms):`POST /api/upload-intent` 先收 envelope,PUT 完成即自動入列+推送並回傳回執(3 RTT → 2);intent id 簽進 HMAC、單次使用;**舊 upload-url→PUT→send 流程完整保留**,client 失敗時自動退回
+- [x] **收件匣首屏快取**(首屏 −230ms):清單(密文)存 IndexedDB,開 app 先渲染再背景刷新;伺服器連不上時保留快取畫面
+- [x] **圖片壓縮移到 Web Worker**:`image-worker.js` 模組 worker,失敗自動退回主執行緒
+- [x] **檔案通知附加密縮圖**:96px WebP(≤1.2KB)用同一 CEK 加密進 `envelope.thumb`;通知顯示縮圖(data URL),詳情頁未下載前即有預覽;超出 push 預算自動棄縮圖,伺服器亦強制 4KB 上限
+- [x] **推送送達時間探針**:診斷頁可選另一台已訂閱裝置,NTP 式往返(A→push→B 的 SW 自動 pong→push→A,單一時鐘)3 次取中位數,單程 ≈ RTT/2;會在對方裝置跳探針通知(UI 有標示)
 - [ ] *(非程式)* SJC 繞路是 ISP↔Cloudflare peering 層問題:Argo Smart Routing / 付費方案可能把台灣流量收回 TPE — 屆時再重測,若 edge 移到 TPE 則同步評估搬 R2 bucket 到 APAC
 
 ## 分享捷徑(Android)

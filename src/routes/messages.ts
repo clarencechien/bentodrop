@@ -27,7 +27,7 @@ export function validEnvelopeShape(e: unknown): e is Envelope {
   return true;
 }
 
-async function retentionMs(env: Env, userId: string): Promise<number> {
+export async function retentionMs(env: Env, userId: string): Promise<number> {
   const row = await env.DB.prepare("SELECT retention_days FROM users WHERE user_id = ?")
     .bind(userId).first<{ retention_days: number }>();
   return (row?.retention_days ?? 7) * 24 * 3600 * 1000;
@@ -77,6 +77,9 @@ export async function handleSend(req: Request, env: Env, device: DeviceCtx): Pro
     }
   } else {
     // §3.2 / §4.3: verify the object really exists and matches the declared size.
+    // File envelopes also ride in push payloads (pointer + optional encrypted
+    // thumbnail), so they share the ~4KB budget.
+    if (encoded.length > PUSH_ENVELOPE_MAX) return apiError(413, "too_large", "envelope exceeds push payload budget");
     if (typeof envelope.obj !== "string" || envelope.ct) return apiError(400, "bad_envelope", "file needs obj, no ct");
     const expectedPrefix = `u/${device.userId}/inbox/`;
     if (!envelope.obj.startsWith(expectedPrefix)) return apiError(403, "forbidden_key");

@@ -10,6 +10,7 @@
 
 import type { DeviceCtx, Env } from "../types";
 import { apiError, hmacSign, json, readJson, randomToken } from "../lib/util";
+import { fanoutPush } from "../fanout";
 
 const PROBE_KEY = "diag/_probe";
 const PROBE_BYTES = 1024;
@@ -143,6 +144,52 @@ export async function diagEcho(req: Request, _env: Env, _device: DeviceCtx): Pro
   const bytes = await req.arrayBuffer();
   if (bytes.byteLength > ECHO_MAX_BYTES) return apiError(400, "too_large", "echo 上限 64 KB");
   return json({ bytes: bytes.byteLength, workerMs: Math.round(performance.now() - t0) });
+}
+
+// ── push-delivery probe (handoff §2.3, NTP-style) ────────────────────
+// A → push → B's SW → pong request → push → A, timed entirely on A's
+// clock; one-way ≈ RTT/2. The server is a stateless relay between the
+// user's OWN devices — payloads carry no content, only ids.
+
+/** POST /api/diag/probe {targetDeviceId} — push a probe to a sibling device. */
+export async function diagProbe(req: Request, env: Env, device: DeviceCtx): Promise<Response> {
+  const limited = await rateLimit(env, device, "probe", UPLOADS_PER_HOUR);
+  if (limited) return limited;
+  const body = await readJson<{ targetDeviceId?: string }>(req);
+  const target = body?.targetDeviceId ?? "";
+  const owned = await env.DB.prepare(
+    "SELECT 1 FROM devices WHERE device_id = ? AND user_id = ?",
+  ).bind(target, device.userId).first();
+  if (!owned || target === device.deviceId) return apiError(400, "bad_target", "選擇同帳號的另一台裝置");
+
+  const probeId = randomToken(9);
+  const receipts = await fanoutPush(
+    env, device.userId,
+    { t: "probe", probeId, originDeviceId: device.deviceId },
+    60, undefined, target,
+  );
+  const hit = receipts.find((r) => r.deviceId === target);
+  if (!hit) return apiError(409, "target_unsubscribed", "對方裝置沒有推送訂閱");
+  return json({ probeId, pushed: hit.ok });
+}
+
+/** POST /api/diag/probe-pong {probeId, originDeviceId} — the target's SW answers. */
+export async function diagProbePong(req: Request, env: Env, device: DeviceCtx): Promise<Response> {
+  const body = await readJson<{ probeId?: string; originDeviceId?: string }>(req);
+  const probeId = body?.probeId ?? "";
+  const origin = body?.originDeviceId ?? "";
+  if (!/^[A-Za-z0-9_-]{6,32}$/.test(probeId)) return apiError(400, "bad_probe");
+  const owned = await env.DB.prepare(
+    "SELECT 1 FROM devices WHERE device_id = ? AND user_id = ?",
+  ).bind(origin, device.userId).first();
+  if (!owned) return apiError(403, "forbidden", "探針只能回給同帳號的裝置");
+
+  await fanoutPush(
+    env, device.userId,
+    { t: "probe-pong", probeId },
+    60, undefined, origin,
+  );
+  return json({ ok: true });
 }
 
 /** Cron helper: delete diag objects older than an hour (client delete is the

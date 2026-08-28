@@ -21,6 +21,7 @@ export async function fanoutPush(
   payload: unknown,
   ttlSeconds: number,
   excludeDeviceId?: string,
+  onlyDeviceId?: string,
 ): Promise<DeliveryReceipt[]> {
   const subs = await env.DB.prepare(
     `SELECT s.device_id, s.endpoint, s.p256dh, s.auth, d.label
@@ -41,6 +42,7 @@ export async function fanoutPush(
   await Promise.all(
     (subs.results ?? [])
       .filter((s) => s.device_id !== excludeDeviceId)
+      .filter((s) => onlyDeviceId === undefined || s.device_id === onlyDeviceId)
       .map(async (s) => {
         const result = await sendWebPush(
           { endpoint: s.endpoint, p256dh: s.p256dh, auth: s.auth }, bytes, ttlSeconds, vapid,

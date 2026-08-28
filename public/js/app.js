@@ -2,7 +2,7 @@
 import * as C from "./crypto.js";
 import { api, ApiError } from "./api.js";
 import { K, kvDelete, kvGet, kvSet } from "./store.js";
-import { compressImage, isHeic, isImage } from "./image.js";
+import { compressImage, isHeic, isImage, makeThumb } from "./image.js";
 import { qrSvg } from "./qr.js";
 import { decodeQrFromFile } from "./qr-import.js";
 import { formatReport, runDiagnostics } from "./diag.js";
@@ -389,7 +389,44 @@ async function decryptPreview(m) {
 async function refreshMessages() {
   const { messages } = await api.messages();
   state.msgs = messages;
+  // First-paint cache (README 優化 #3): envelopes are ciphertext, same
+  // at-rest posture as the server's copy.
+  kvSet(K.MSG_CACHE, { at: Date.now(), messages }).catch(() => {});
   return messages;
+}
+
+// ── file-transfer plumbing (README 優化 #1/#4) ───────────────────────
+const PREFETCH_CACHE = "bentodrop-prefetch-v1";
+const prefetchPath = (msgId) => `/__prefetch/${msgId}`;
+
+async function dropPrefetch(msgId) {
+  try {
+    const cache = await caches.open(PREFETCH_CACHE);
+    if (msgId) await cache.delete(prefetchPath(msgId));
+    else for (const req of await cache.keys()) await cache.delete(req);
+  } catch { /* cache is an optimization, never a failure */ }
+}
+
+// Compression runs in a dedicated worker so a phone's 300ms of canvas work
+// never freezes the UI; any worker hiccup falls back to the inline path.
+let imageWorker = null;
+async function compressOffThread(file, original) {
+  try {
+    imageWorker ??= new Worker("/js/image-worker.js", { type: "module" });
+    return await new Promise((resolve, reject) => {
+      const id = Math.random().toString(36).slice(2);
+      const onMsg = (e) => {
+        if (e.data?.id !== id) return;
+        imageWorker.removeEventListener("message", onMsg);
+        if (e.data.ok) resolve(e.data.prepared);
+        else reject(new Error(e.data.error));
+      };
+      imageWorker.addEventListener("message", onMsg);
+      imageWorker.postMessage({ id, file, original });
+    });
+  } catch {
+    return compressImage(file, { original });
+  }
 }
 
 async function refreshContacts() {
@@ -475,17 +512,37 @@ function renderInbox() {
     }
     $status.replaceChildren(el(`<ul class="receipts"><li><b>…</b> 處理中</li></ul>`));
     try {
-      const prepared = await compressImage(file, { original });
+      const prepared = await compressOffThread(file, original);
       if (!prepared.compressed && isImage(file) && !original) {
         toast(isHeic(file) ? "這張圖無法在瀏覽器中壓縮,將以原檔傳送(含 EXIF)" : "無法壓縮,以原檔傳送(含 EXIF)", true);
       }
+      // Encrypted thumbnail for the notification (README 優化 #5) — best
+      // effort, and rebuilt without it if the push budget is exceeded.
+      let thumbBytes = null;
+      if (/^image\//.test(prepared.mime)) {
+        thumbBytes = await makeThumb(prepared.bytes, prepared.mime).catch(() => null);
+      }
       const target = currentTarget();
-      const { envelope, ciphertext } = target
-        ? await C.encryptFileEnvelopeFor(target.peerPubkey, state.userId, prepared.bytes, prepared.name, prepared.mime)
-        : await C.encryptFileEnvelope(state.kMaster, state.userId, prepared.bytes, prepared.name, prepared.mime);
-      const up = await api.uploadUrl(envelope.id, ciphertext.byteLength);
-      await api.putObject(up.url, ciphertext);
-      const res = await api.send(envelope, target?.peerUserId);
+      const build = (thumb) => target
+        ? C.encryptFileEnvelopeFor(target.peerPubkey, state.userId, prepared.bytes, prepared.name, prepared.mime, thumb)
+        : C.encryptFileEnvelope(state.kMaster, state.userId, prepared.bytes, prepared.name, prepared.mime, thumb);
+      let { envelope, ciphertext } = await build(thumbBytes);
+      if (thumbBytes && JSON.stringify(envelope).length > 3500) {
+        ({ envelope, ciphertext } = await build(null));
+      }
+
+      // Merged flow (README 優化 #2): intent → PUT finalizes in one go.
+      // Any failure falls back to the classic sign → PUT → send flow.
+      let res;
+      try {
+        const intent = await api.uploadIntent(envelope, target?.peerUserId);
+        res = await api.putObject(intent.url, ciphertext);
+        if (!res.msgId) throw new Error("intent not finalized");
+      } catch {
+        const up = await api.uploadUrl(envelope.id, ciphertext.byteLength);
+        await api.putObject(up.url, ciphertext);
+        res = await api.send(envelope, target?.peerUserId);
+      }
       showReceipts($status, res.receipts, target?.label);
       await refreshMessages().catch(() => {});
       paint();
@@ -686,8 +743,18 @@ function renderInbox() {
     await sendFileNow(file, { original: root.querySelector("#origMode").checked });
   };
 
-  refreshMessages().then(paint).catch(() => {
-    $list.replaceChildren(el(`<div class="banner err">連不上伺服器,稍後再試。</div>`));
+  // Instant first paint from the cached listing, then refresh from the
+  // server. A refresh failure keeps the cached view instead of wiping it.
+  kvGet(K.MSG_CACHE).then((cached) => {
+    if (cached?.messages?.length && !state.msgs.length) {
+      state.msgs = cached.messages;
+      paint();
+    }
+  }).catch(() => {}).finally(() => {
+    refreshMessages().then(paint).catch(() => {
+      if (state.msgs.length) toast("連不上伺服器,顯示上次的收件匣", true);
+      else $list.replaceChildren(el(`<div class="banner err">連不上伺服器,稍後再試。</div>`));
+    });
   });
 
   // §6.5: gentle backup nudge after the first file / on multi-device (checked in pairing flow)
@@ -744,30 +811,57 @@ async function openDetail(m) {
       box.append(el(`<div class="banner err">無法解密這個檔案。</div>`));
     } else {
       box.append(el(`<h3 style="margin-top:8px">${esc(d.meta.name)}</h3><p class="detail-meta">${esc(d.meta.mime)} · ${fmtSize(m.sizeBytes)}</p>`));
-      const dl = el(`<button class="btn inline" type="button" style="margin-top:12px">下載並解密</button>`);
       const slot = el(`<div></div>`);
-      dl.onclick = async () => {
-        dl.disabled = true;
-        dl.textContent = "下載中…";
-        try {
-          const { url } = await api.downloadUrl(m.envelope.obj);
-          const cipher = await api.getObject(url);
-          const plain = await C.decryptFileBody(await keysFor(m.envelope), m.envelope, cipher);
-          const blob = new Blob([plain], { type: d.meta.mime });
-          const objUrl = URL.createObjectURL(blob);
-          if (/^image\//.test(d.meta.mime)) {
-            slot.append(el(`<img class="detail-img" alt="${esc(d.meta.name)}" src="${objUrl}">`));
-          }
-          const a = el(`<a class="btn inline" style="text-decoration:none;margin-top:10px" download="${esc(d.meta.name)}" href="${objUrl}">儲存檔案</a>`);
-          slot.append(a);
-          dl.remove();
-        } catch (err) {
-          dl.disabled = false;
-          dl.textContent = "下載並解密";
-          toast(err.message, true);
+      const showPlain = (plain) => {
+        const blob = new Blob([plain], { type: d.meta.mime });
+        const objUrl = URL.createObjectURL(blob);
+        slot.replaceChildren();
+        if (/^image\//.test(d.meta.mime)) {
+          slot.append(el(`<img class="detail-img" alt="${esc(d.meta.name)}" src="${objUrl}">`));
         }
+        slot.append(el(`<a class="btn inline" style="text-decoration:none;margin-top:10px" download="${esc(d.meta.name)}" href="${objUrl}">儲存檔案</a>`));
       };
-      box.append(dl, slot);
+
+      // Prefetched by the SW when the push arrived? Decrypt and show NOW.
+      let instant = false;
+      try {
+        const cache = await caches.open(PREFETCH_CACHE);
+        const hit = await cache.match(prefetchPath(m.msgId));
+        if (hit) {
+          const cipher = new Uint8Array(await hit.arrayBuffer());
+          showPlain(await C.decryptFileBody(await keysFor(m.envelope), m.envelope, cipher));
+          instant = true;
+        }
+      } catch { /* fall through to the live download */ }
+
+      if (!instant) {
+        // Encrypted thumbnail (優化 #5): an immediate preview while the
+        // real bytes are a tap away.
+        if (m.envelope.thumb) {
+          C.decryptThumb(await keysFor(m.envelope), m.envelope).then((tb) => {
+            if (!tb || slot.querySelector(".detail-img")) return;
+            const b64 = C.b64u(tb).replace(/-/g, "+").replace(/_/g, "/");
+            slot.prepend(el(`<img class="detail-thumb" alt="預覽" src="data:image/webp;base64,${b64.padEnd(Math.ceil(b64.length / 4) * 4, "=")}">`));
+          }).catch(() => {});
+        }
+        const dl = el(`<button class="btn inline" type="button" style="margin-top:12px">下載並解密</button>`);
+        dl.onclick = async () => {
+          dl.disabled = true;
+          dl.textContent = "下載中…";
+          try {
+            const { url } = await api.downloadUrl(m.envelope.obj);
+            const cipher = await api.getObject(url);
+            showPlain(await C.decryptFileBody(await keysFor(m.envelope), m.envelope, cipher));
+            dl.remove();
+          } catch (err) {
+            dl.disabled = false;
+            dl.textContent = "下載並解密";
+            toast(err.message, true);
+          }
+        };
+        box.append(dl);
+      }
+      box.append(slot);
     }
   }
 
@@ -781,6 +875,7 @@ async function openDetail(m) {
       if (!(err instanceof ApiError && err.status === 404)) return toast(err.message, true);
       toast("這則訊息已被刪除");
     }
+    dropPrefetch(m.msgId);
     back.remove();
     await refreshMessages().catch(() => {});
     renderInbox();
@@ -1327,6 +1422,11 @@ async function renderSettings() {
       <div class="compartment">
         <h3>診斷</h3>
         <p class="small muted">測量這台裝置到伺服器的實際速度:加密、上傳、下載各花多久,R2 離邊緣節點多遠。會上傳約 4 MB 的測試資料,測完立即刪除。</p>
+        <div class="row" id="probeRow" style="margin-top:8px" hidden>
+          <label class="small muted" for="probeTarget">推送探針對象:</label>
+          <select id="probeTarget"><option value="">不測推送送達</option></select>
+        </div>
+        <p class="small muted" id="probeNote" hidden>測推送送達會在對方裝置跳出幾則探針通知。</p>
         <button class="btn inline" id="diagStart" type="button" style="margin-top:8px">開始測試</button>
         <ul class="receipts" id="diagProgress" style="margin-top:10px"></ul>
         <div id="diagResult"></div>
@@ -1461,6 +1561,19 @@ async function renderSettings() {
   };
   root.querySelector("#stBackup").onclick = () => renderBackup();
 
+  // Push-probe target: another device of this user with a live subscription.
+  const probeCandidates = me.devices.filter((d) => !d.isSelf && d.subscribed);
+  if (probeCandidates.length) {
+    const $probeRow = root.querySelector("#probeRow");
+    const $probeSel = root.querySelector("#probeTarget");
+    $probeRow.hidden = false;
+    root.querySelector("#probeNote").hidden = false;
+    for (const d of probeCandidates) {
+      $probeSel.append(el(`<option value="${esc(d.deviceId)}">${esc(d.label ?? d.deviceId.slice(0, 8))}</option>`));
+    }
+    $probeSel.value = probeCandidates[0].deviceId;
+  }
+
   // Transport diagnostics — per-step checklist (no spinners), verdict first.
   root.querySelector("#diagStart").onclick = async () => {
     const $btn = root.querySelector("#diagStart");
@@ -1473,6 +1586,7 @@ async function renderSettings() {
     const items = new Map();
     try {
       const result = await runDiagnostics(state.kMaster, state.userId, {
+        probeTargetId: root.querySelector("#probeTarget")?.value || null,
         onStep: (label) => {
           const li = el(`<li><b>…</b> <span>${esc(label)}</span></li>`);
           items.set(label, li);
@@ -1503,7 +1617,12 @@ async function renderSettings() {
         row(`${s.label} 端到端`, `${s.e2eMs} ms(${s.e2eMinMs}–${s.e2eMaxMs})`);
       }
       row("圖片壓縮", result.compressMs === null ? "未測量" : `${result.compressMs} ms`, result.compressMs > 300 ? " ⚠" : "");
-      row("推送送達", "未測量");
+      if (result.pushProbe && !result.pushProbe.error) {
+        row("推送往返(→對方→回)", `${result.pushProbe.rttMs} ms`, "");
+        row("推送單程估計", `~${result.pushProbe.oneWayMs} ms`);
+      } else {
+        row("推送送達", result.pushProbe?.error ? "測量失敗" : "未測量");
+      }
       const copy = el(`<button class="btn ghost inline" type="button" style="margin-top:10px">複製報告</button>`);
       copy.onclick = () => copyText(formatReport(result));
       $res.append(box, table, copy);
@@ -1516,6 +1635,7 @@ async function renderSettings() {
   root.querySelector("#stClearMsgs").onclick = async () => {
     if (!confirm("清空所有訊息?所有裝置都會消失,已下載到本機的副本不受影響。")) return;
     await api.clearMessages().catch((err) => toast(err.message, true));
+    dropPrefetch();
     toast("已清空");
   };
   root.querySelector("#stReset").onclick = async () => {
