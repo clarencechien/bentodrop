@@ -59,6 +59,8 @@ export default defineConfig({
           VAPID_PRIVATE_JWK: vapidPrivateJwk,
           VAPID_SUBJECT: "mailto:test@example.com",
           URL_SIGNING_SECRET: "test-url-signing-secret",
+          PUSH_ENDPOINT_ALLOW: "push.test", // exercises the self-hosted escape hatch
+
         },
         workers: [
           {

@@ -72,7 +72,7 @@ npm run dev        # wrangler dev(本機 D1/R2);首次先跑:
 
 ```bash
 npm run typecheck   # tsc
-npm test            # 113 項整合/單元測試(真 workerd + 真 D1/R2 模擬)
+npm test            # 114 項整合/單元測試(真 workerd + 真 D1/R2 模擬)
 npm run test:e2e    # 23 項 Playwright E2E(真瀏覽器 + wrangler dev)
 npm run test:all    # 以上全部
 ```
@@ -85,7 +85,7 @@ npm run test:all    # 以上全部
 |---|---|
 | `crypto.spec.ts` | client 加密:BIP39(與 @scure/bip39 參考實作交叉比對)、checksum 抓錯字、HKDF 導鍵、envelope 往返、每則新 CEK、meta 加密、配對 ECDH 包裹、`https://` 白名單偵測 |
 | `webpush.spec.ts` | RFC 8291 aes128gcm 加密往返、header 格式、4KB 預算;RFC 8292 VAPID JWT 簽章驗證 |
-| `api.spec.ts` | 註冊/認證、文字路徑全鏈路(加密→送出→攔截推送→解 transport→解 envelope)、發送端排除、收件匣已讀保留、跨 user 隔離、檔案路徑全鏈路(§4.3 大小驗證/物件缺失/謊報大小刪物件/簽名竄改/跨 user key)、410 立即刪訂閱、連續失敗 5 次刪除、測試推送、保留期設定 |
+| `api.spec.ts` | 註冊/認證、文字路徑全鏈路(加密→送出→攔截推送→解 transport→解 envelope)、發送端排除、收件匣已讀保留、跨 user 隔離、檔案路徑全鏈路(§4.3 大小驗證/物件缺失/謊報大小刪物件/簽名竄改/跨 user key)、410 立即刪訂閱、連續失敗 5 次刪除、測試推送、保留期設定、推送端點白名單(含子網域偽裝與 `PUSH_ENDPOINT_ALLOW` 逃生口) |
 | `pairing.spec.ts` | §6.6 三條護欄各自對抗性測試:錯 3 次作廢(對的碼也救不回)、TTL 過期、單次使用(finish 燒毀)、每小時 5 次;code 只存 hash、wrapped blob 交付後清除、未確認前拿不到秘密 |
 | `contacts.spec.ts` | §11:身分金鑰單次建立與收斂、私鑰只以密文存放、加好友全流程與護欄(30 分 TTL)、跨 user ecdh 收發(通知 payload 解密 + 收件匣)、非好友 403、解除好友即封鎖、跨 user 檔案下載授權、明文 24h 保留上限 |
 | `cli.spec.ts` | §12.3 CLI 核心對真 Worker 全流程:取公鑰→包裹→推送→只有身分私鑰能解;無身分時的明確錯誤;明文模式權限 |
@@ -133,7 +133,7 @@ public/                 PWA(vanilla ES modules,無建置步驟)
   js/image-worker.js    背景執行緒圖片壓縮(module worker)
   sw.js                 push 解密與通知 action、檔案預取、share-target(含 CSRF 防護)、shell cache
 cli/                    bentodrop-push.mjs + lib.mjs(§12.3,零依賴)
-test/                   workerd 整合測試(113)
+test/                   workerd 整合測試(114)
 e2e/                    Playwright E2E(23)
 scripts/                deploy(零設定部署)/ gen-vapid / gen-icons / e2e-server
 ```
@@ -175,7 +175,7 @@ scripts/                deploy(零設定部署)/ gen-vapid / gen-icons / e2e-ser
 2. 每次 API 呼叫付 ~200ms 台美 RTT;小訊息的耗時幾乎全是 round trip 疊加
 3. **WebRTC 暫不做**:1.5–2.5s 屬可用範圍;更便宜的優化排在前面(見下方 TODO)。若日後 ISP 路由改善或做了預取仍嫌慢,再重開此題
 
-### 優化(依實測數據排序 — 前六項已完成)
+### 優化(依實測數據排序 — 前七項已完成)
 
 文字路徑已是架構最優(內容在推送封包內,接收端零下載、無可省往返),以下全部針對**檔案路徑**與**首屏**:
 
@@ -185,6 +185,7 @@ scripts/                deploy(零設定部署)/ gen-vapid / gen-icons / e2e-ser
 - [x] **圖片壓縮移到 Web Worker**:`image-worker.js` 模組 worker,失敗自動退回主執行緒
 - [x] **檔案通知附加密縮圖**:96px WebP(≤1.2KB)用同一 CEK 加密進 `envelope.thumb`;通知顯示縮圖(data URL),詳情頁未下載前即有預覽;超出 push 預算自動棄縮圖,伺服器亦強制 4KB 上限
 - [x] **推送送達時間探針**:診斷頁可選另一台已訂閱裝置,NTP 式往返(A→push→B 的 SW 自動 pong→push→A,單一時鐘)3 次取中位數,單程 ≈ RTT/2;會在對方裝置跳探針通知(UI 有標示)
+- [x] **剪貼簿圖片 intent 預熱**(按下→送出 2 RTT → 1 RTT,再省 ~230ms + 壓縮 ~300ms):圖片預覽掛在「⚡即送」下方閒置時,背景先完成壓縮、加密、開單;按下即送只剩一次 PUT。換收件人或剪貼簿內容改變即作廢重建;過期/失敗自動退回完整流程(浪費的 intent 單次使用、10 分鐘過期、定案時重查,無濫用面)
 - [ ] *(非程式)* SJC 繞路是 ISP↔Cloudflare peering 層問題:Argo Smart Routing / 付費方案可能把台灣流量收回 TPE — 屆時再重測,若 edge 移到 TPE 則同步評估搬 R2 bucket 到 APAC
 
 ## 分享捷徑(Android)
@@ -234,7 +235,7 @@ node cli/bentodrop-push.mjs --plain "磁碟 85%"  # 明文模式(token 需開啟
 - **第一輪(2026-08-28,Phase 2 完成後)**:發現並修復 share-target CSRF(上方 `Sec-Fetch-Site` 防護);同輪驗證 SQL 參數化、逐路由授權、HMAC 簽名 URL、XSS 轉義與加密衛生(IV/CEK 新鮮度、無偏隨機、timing-safe 比對)無問題。
 - **第二輪(2026-08-28,診斷 + 效能優化上線後)**:針對新增攻擊面 — `/api/diag/*`、合併上傳 intent 流程(含 HMAC 分隔符注入的具體分析)、SW 預取與通知 action、`copy-msg` handler — **零發現**。重點驗證:intent 定案時重查好友關係且失敗即刪物件、diag 刪除鎖在 `diag/{userId}/` 前綴、通知「開啟」雙重 `https://` 把關、預取走同一套下載授權。
 
-`/api/subscribe` 接受任意 https push endpoint 屬 Web Push 標準行為,不列為弱點。
+第二輪備註提到的 `/api/subscribe` blind-SSRF 面已於後續加固:endpoint 主機名限縮為已知推送服務白名單(FCM / Mozilla / Apple / WNS,防子網域偽裝);自架推送(UnifiedPush / ntfy)可用 `PUSH_ENDPOINT_ALLOW` 環境變數(逗號分隔主機名)加入,不影響任何正常瀏覽器。
 
 ## 已知限制
 
