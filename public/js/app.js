@@ -1860,28 +1860,11 @@ async function boot() {
         toast(copied ? "已複製 ✓" : "無法自動複製,按下方的複製按鈕", !copied);
         return;
       }
-      // Notification「開啟」action relayed through the app (Android: the
-      // SW's openWindow can't launch full Chrome, but page NAVIGATION to
-      // the intent:// form can). The user explicitly tapped 開啟, so
-      // launching the (https-only) link here honors their click — this is
-      // not §7.2.1 auto-navigation. Detail opens first so a failed launch
-      // leaves the manual 開啟連結 button right under their thumb.
-      if (e.data?.t === "open-url" && typeof e.data.url === "string" && e.data.url.startsWith("https://")) {
-        await refreshMessages().catch(() => {});
-        renderInbox();
-        const m = state.msgs.find((x) => x.msgId === e.data.msgId);
-        if (m) openDetail(m);
-        const intent = /Android/.test(navigator.userAgent) && C.androidChromeIntent(e.data.url);
-        if (intent) {
-          location.assign(intent); // launches Chrome; this page stays put
-        } else {
-          const w = window.open(e.data.url, "_blank", "noopener");
-          if (!w) toast("按下方的「開啟連結」", true); // popup blocked without a gesture
-        }
-        return;
-      }
       // notificationclick → open the message; the detail view carries the
       // real copy button (§7.2 — auto-copy without user activation is a lie)
+      // and the real link (§7.2.1 — the app never auto-navigates: E2E
+      // content is untrusted input, auto-opening would hand the sender the
+      // user's click).
       if (e.data?.t === "open-msg") {
         await refreshMessages().catch(() => {});
         renderInbox();
@@ -1933,6 +1916,16 @@ async function boot() {
     return;
   }
   renderInbox();
+  // Notification 查看 on a cold start: the message id rides the query
+  // string (no postMessage race with a booting app) — land on the detail.
+  const mParam = new URLSearchParams(location.search).get("m");
+  if (mParam) {
+    history.replaceState(null, "", "/");
+    refreshMessages().then(() => {
+      const m = state.msgs.find((x) => x.msgId === mParam);
+      if (m) openDetail(m);
+    }).catch(() => {});
+  }
   ensurePush(); // silent re-sync (§8.3 #3)
   ensureUserIdentity().catch(() => {}); // §5.2 — keeps CLI pubkey + friend flow ready
   window.addEventListener("focus", async () => {

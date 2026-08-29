@@ -369,9 +369,9 @@ test("notification 複製 action: copy-msg writes the clipboard and opens the me
   await context.close();
 });
 
-test("notification 開啟 action: open-url relay launches the link and opens the detail", async ({ browser, baseURL }) => {
+test("notification 查看: cold start via /?m= lands on the message detail, no auto-navigation", async ({ browser, baseURL }) => {
   const { context, page } = await newDeviceContext(browser, baseURL!);
-  await onboard(page, "opener");
+  await onboard(page, "viewer");
   const url = "https://example.com/from-notification";
   await sendText(page, url);
   await refreshInbox(page);
@@ -380,19 +380,14 @@ test("notification 開啟 action: open-url relay launches the link and opens the
     return (await api.messages()).messages[0].msgId as string;
   });
 
-  // What the SW posts when the notification's 開啟 button is tapped and it
-  // relays through the app (Android path; desktop uses window.open — stub
-  // it so the launch is observable and doesn't spawn a real tab).
-  await page.evaluate(({ id, u }) => {
-    (window as any).__opened = [];
-    window.open = ((target: string) => { (window as any).__opened.push(target); return {}; }) as any;
-    navigator.serviceWorker.dispatchEvent(new MessageEvent("message", { data: { t: "open-url", msgId: id, url: u } }));
-  }, { id: msgId, u: url });
-
+  // What the SW opens when 查看 is tapped with no window alive: the app
+  // itself, message id in the query string (same-origin — never the URL).
+  await page.goto(`/?m=${msgId}`);
   await expect(page.locator(".modal .detail-body")).toHaveText(url);
-  await expect.poll(() => page.evaluate(() => (window as any).__opened)).toEqual([url]);
-  // The manual button is right there too, in case the launch was blocked.
+  // The link is there for the user's own click; the app did not navigate.
   await expect(page.locator(".modal").getByRole("link", { name: "開啟連結" })).toBeVisible();
+  expect(new URL(page.url()).pathname).toBe("/");
+  expect(new URL(page.url()).search).toBe(""); // query cleaned up
   await context.close();
 });
 
