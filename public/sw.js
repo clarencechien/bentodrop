@@ -7,13 +7,13 @@
 //    push permission if a push produces no notification (§5.5)
 
 import {
-  androidChromeIntent, b64u, decryptTextEnvelope, decryptFileMeta, decryptJson, decryptThumb, deriveKmaster, detectTextKind,
+  b64u, decryptTextEnvelope, decryptFileMeta, decryptJson, decryptThumb, deriveKmaster, detectTextKind,
   encryptFileEnvelope, encryptTextEnvelope, importIdentityPrivate,
 } from "./js/crypto.js";
 import { compressImage } from "./js/image.js";
 import { K, kvGet } from "./js/store.js";
 
-const SHELL_CACHE = "bentodrop-shell-v6";
+const SHELL_CACHE = "bentodrop-shell-v7";
 const PREFETCH_CACHE = "bentodrop-prefetch-v1";
 const PREFETCH_MAX_BYTES = 5 * 1024 * 1024;
 const PREFETCH_CELLULAR_MAX_BYTES = 1.5 * 1024 * 1024; // respect mobile data
@@ -289,29 +289,25 @@ self.addEventListener("notificationclick", (event) => {
   const data = event.notification.data ?? {};
   const action = event.action;
   event.waitUntil((async () => {
-    // 開啟 action: the user explicitly tapped it, so navigating to the
-    // (https-only, §7.2.1) URL is their click — not auto-navigation.
-    if (action === "open-url" && data.url && data.url.startsWith("https://")) {
-      // On Android an installed PWA's openWindow lands out-of-scope URLs in
-      // a Custom-Tab overlay; try the intent:// form first so the link opens
-      // in full Chrome. Rejected/unsupported → plain URL as before.
-      if (/Android/.test(navigator.userAgent)) {
-        const intent = androidChromeIntent(data.url);
-        if (intent) {
-          try {
-            await self.clients.openWindow(intent);
-            return;
-          } catch { /* fall through to the plain URL */ }
-        }
-      }
+    const isUrlAction = action === "open-url" && data.url && data.url.startsWith("https://");
+    // 開啟 action off Android: openWindow(url) opens a real browser tab
+    // directly — the user explicitly tapped it, so navigating to the
+    // (https-only, §7.2.1) URL is their click, not auto-navigation.
+    // On Android, openWindow is the wrong tool either way: a plain URL
+    // lands in the Custom-Tab overlay and the intent:// form is silently
+    // ignored (measured on Pixel). Page NAVIGATION to intent:// works, so
+    // Android relays through the app below, which launches full Chrome.
+    if (isUrlAction && !/Android/.test(navigator.userAgent)) {
       await self.clients.openWindow(data.url);
       return;
     }
     const all = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
     const client = all.find((c) => new URL(c.url).origin === location.origin);
-    const msg = action === "copy"
-      ? { t: "copy-msg", msgId: data.msgId, text: data.text }
-      : { t: "open-msg", msgId: data.msgId };
+    const msg = isUrlAction
+      ? { t: "open-url", msgId: data.msgId, url: data.url }
+      : action === "copy"
+        ? { t: "copy-msg", msgId: data.msgId, text: data.text }
+        : { t: "open-msg", msgId: data.msgId };
     if (client) {
       await client.focus();
       client.postMessage(msg);
