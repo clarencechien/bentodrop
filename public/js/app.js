@@ -866,14 +866,22 @@ async function openDetail(m) {
       box.append(el(`<div class="detail-body">${esc(text)}</div>`));
       const actions = el(`<div class="row" style="margin-top:12px"></div>`);
       // Installed PWA on Android opens out-of-scope links in a Custom-Tab
-      // overlay; the intent:// form launches full Chrome instead (with the
-      // plain URL as Android's fallback when Chrome is absent).
-      const linkHref = (u) =>
-        (/Android/.test(navigator.userAgent) && isStandalone() && C.androidChromeIntent(u)) || u;
+      // overlay; the intent:// form launches full Chrome instead (plain URL
+      // as Android's fallback when Chrome is absent). Chrome only honors
+      // intent: for a top-frame navigation carrying the click's gesture —
+      // a target=_blank popup context drops it — so intent anchors navigate
+      // same-tab: launching the external activity leaves this page as-is.
+      // URLs with a fragment keep the plain form (a '#' can't ride an
+      // intent URI), trading full Chrome for an intact anchor.
+      const linkEl = (u, label) => {
+        const intent = /Android/.test(navigator.userAgent) && isStandalone() && C.androidChromeIntent(u);
+        return intent
+          ? el(`<a class="btn inline" style="text-decoration:none" href="${esc(intent)}">${esc(label)}</a>`)
+          : el(`<a class="btn inline" style="text-decoration:none" target="_blank" rel="noopener noreferrer" href="${esc(u)}">${esc(label)}</a>`);
+      };
       if (det.kind === "url") {
         // §7.2.1: https:// only, never auto-navigate, show the full URL.
-        const open = el(`<a class="btn inline" style="text-decoration:none" target="_blank" rel="noopener noreferrer" href="${esc(linkHref(det.url))}">開啟連結</a>`);
-        actions.append(open);
+        actions.append(linkEl(det.url, "開啟連結"));
       }
       const copy = el(`<button class="btn inline" type="button">複製</button>`);
       copy.onclick = () => copyText(text);
@@ -882,7 +890,12 @@ async function openDetail(m) {
       if (det.kind === "text-with-urls") {
         const ul = el(`<ul class="url-list"></ul>`);
         for (const u of det.urls) {
-          ul.append(el(`<li><a target="_blank" rel="noopener noreferrer" href="${esc(linkHref(u))}">${esc(u)}</a></li>`));
+          const li = el(`<li></li>`);
+          const a = linkEl(u, u);
+          a.removeAttribute("class");
+          a.removeAttribute("style");
+          li.append(a);
+          ul.append(li);
         }
         box.append(ul);
       }
