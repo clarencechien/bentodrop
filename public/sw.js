@@ -13,7 +13,7 @@ import {
 import { compressImage } from "./js/image.js";
 import { K, kvGet } from "./js/store.js";
 
-const SHELL_CACHE = "bentodrop-shell-v8";
+const SHELL_CACHE = "bentodrop-shell-v9";
 const PREFETCH_CACHE = "bentodrop-prefetch-v1";
 const PREFETCH_MAX_BYTES = 5 * 1024 * 1024;
 const PREFETCH_CELLULAR_MAX_BYTES = 1.5 * 1024 * 1024; // respect mobile data
@@ -260,9 +260,14 @@ self.addEventListener("push", (event) => {
     }
     // §7.2: action buttons on the notification — 複製 for text (the app,
     // once focused, attempts the clipboard write; failure falls back to the
-    // detail view's copy button), 開啟 only for whitelisted https URLs.
+    // detail view's copy button), 查看 for URL and file messages: it opens
+    // the APP at the message, never the external URL directly. "開啟" as a
+    // label promised the browser — a promise Android can't keep from a
+    // WebAPK notification (see notificationclick below).
     const actions = [];
-    if (notif.data?.url) actions.push({ action: "open-url", title: "開啟" });
+    if (notif.data?.msgId && (notif.data.url || notif.data.text === undefined)) {
+      actions.push({ action: "view", title: "查看" });
+    }
     if (notif.data?.text) actions.push({ action: "copy", title: "複製" });
     await self.registration.showNotification(notif.title, {
       body: notif.body,
@@ -289,34 +294,31 @@ self.addEventListener("notificationclick", (event) => {
   const data = event.notification.data ?? {};
   const action = event.action;
   event.waitUntil((async () => {
-    const isUrlAction = action === "open-url" && data.url && data.url.startsWith("https://");
-    // 開啟 action: one tap opens the (https-only, §7.2.1) URL directly —
-    // the user explicitly tapped it, so this is their click, not
-    // auto-navigation. On Android this lands in the Custom Tab (that IS
-    // Chrome — same profile/logins — just embedded UI): a WebAPK
-    // notification has no supported path into full Chrome, since intent://
-    // launches are gesture-gated and the relay through the app carries no
-    // gesture. The in-app 開啟連結 (a real click) is the full-Chrome hop.
-    if (isUrlAction) {
-      try {
-        await self.clients.openWindow(data.url);
-        return;
-      } catch { /* fall through: relay to the app, whose detail view has the link */ }
-    }
+    // Every click lands in the APP, positioned at the message — never on
+    // the external URL. Deliberate consistency, not a missing feature:
+    // (1) clients.openWindow() only takes http(s), never intent://, so a
+    //     direct open can only reach the Custom Tab; and
+    // (2) a notification click is the SW's window-opening permission, not
+    //     the page's transient activation, so a relayed intent:// launch
+    //     is gesture-blocked too.
+    // Full-browser opening therefore lives on the ONE real click the user
+    // makes anyway: the link inside the app (intent:// → full Chrome on
+    // Android). Targets here stay same-origin so they open in the WebAPK.
     const all = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
     const client = all.find((c) => new URL(c.url).origin === location.origin);
-    const msg = isUrlAction
-      ? { t: "open-url", msgId: data.msgId, url: data.url }
-      : action === "copy"
-        ? { t: "copy-msg", msgId: data.msgId, text: data.text }
-        : { t: "open-msg", msgId: data.msgId };
+    const msg = action === "copy"
+      ? { t: "copy-msg", msgId: data.msgId, text: data.text }
+      : { t: "open-msg", msgId: data.msgId };
     if (client) {
       await client.focus();
       client.postMessage(msg);
     } else {
-      const win = await self.clients.openWindow("/");
-      // Give the app a moment to boot before telling it what to do.
-      if (win && data.msgId) setTimeout(() => win.postMessage(msg), 1500);
+      // Cold start: the query string carries the message id — no race with
+      // the app's message listener. copy additionally gets the delayed
+      // postMessage, since the clipboard text can't ride the URL.
+      const target = data.msgId ? `/?m=${encodeURIComponent(data.msgId)}` : "/";
+      const win = await self.clients.openWindow(target);
+      if (win && msg.t === "copy-msg") setTimeout(() => win.postMessage(msg), 1500);
     }
   })());
 });
