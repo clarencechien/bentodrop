@@ -369,6 +369,33 @@ test("notification 複製 action: copy-msg writes the clipboard and opens the me
   await context.close();
 });
 
+test("notification 開啟 action: open-url relay launches the link and opens the detail", async ({ browser, baseURL }) => {
+  const { context, page } = await newDeviceContext(browser, baseURL!);
+  await onboard(page, "opener");
+  const url = "https://example.com/from-notification";
+  await sendText(page, url);
+  await refreshInbox(page);
+  const msgId = await page.evaluate(async () => {
+    const { api } = await import("/js/api.js");
+    return (await api.messages()).messages[0].msgId as string;
+  });
+
+  // What the SW posts when the notification's 開啟 button is tapped and it
+  // relays through the app (Android path; desktop uses window.open — stub
+  // it so the launch is observable and doesn't spawn a real tab).
+  await page.evaluate(({ id, u }) => {
+    (window as any).__opened = [];
+    window.open = ((target: string) => { (window as any).__opened.push(target); return {}; }) as any;
+    navigator.serviceWorker.dispatchEvent(new MessageEvent("message", { data: { t: "open-url", msgId: id, url: u } }));
+  }, { id: msgId, u: url });
+
+  await expect(page.locator(".modal .detail-body")).toHaveText(url);
+  await expect.poll(() => page.evaluate(() => (window as any).__opened)).toEqual([url]);
+  // The manual button is right there too, in case the launch was blocked.
+  await expect(page.locator(".modal").getByRole("link", { name: "開啟連結" })).toBeVisible();
+  await context.close();
+});
+
 test("inbox first paint comes from cache when the server is unreachable", async ({ browser, baseURL }) => {
   const { context, page } = await newDeviceContext(browser, baseURL!);
   await onboard(page, "cacher");
