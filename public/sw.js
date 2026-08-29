@@ -13,7 +13,7 @@ import {
 import { compressImage } from "./js/image.js";
 import { K, kvGet } from "./js/store.js";
 
-const SHELL_CACHE = "bentodrop-shell-v7";
+const SHELL_CACHE = "bentodrop-shell-v8";
 const PREFETCH_CACHE = "bentodrop-prefetch-v1";
 const PREFETCH_MAX_BYTES = 5 * 1024 * 1024;
 const PREFETCH_CELLULAR_MAX_BYTES = 1.5 * 1024 * 1024; // respect mobile data
@@ -290,16 +290,18 @@ self.addEventListener("notificationclick", (event) => {
   const action = event.action;
   event.waitUntil((async () => {
     const isUrlAction = action === "open-url" && data.url && data.url.startsWith("https://");
-    // 開啟 action off Android: openWindow(url) opens a real browser tab
-    // directly — the user explicitly tapped it, so navigating to the
-    // (https-only, §7.2.1) URL is their click, not auto-navigation.
-    // On Android, openWindow is the wrong tool either way: a plain URL
-    // lands in the Custom-Tab overlay and the intent:// form is silently
-    // ignored (measured on Pixel). Page NAVIGATION to intent:// works, so
-    // Android relays through the app below, which launches full Chrome.
-    if (isUrlAction && !/Android/.test(navigator.userAgent)) {
-      await self.clients.openWindow(data.url);
-      return;
+    // 開啟 action: one tap opens the (https-only, §7.2.1) URL directly —
+    // the user explicitly tapped it, so this is their click, not
+    // auto-navigation. On Android this lands in the Custom Tab (that IS
+    // Chrome — same profile/logins — just embedded UI): a WebAPK
+    // notification has no supported path into full Chrome, since intent://
+    // launches are gesture-gated and the relay through the app carries no
+    // gesture. The in-app 開啟連結 (a real click) is the full-Chrome hop.
+    if (isUrlAction) {
+      try {
+        await self.clients.openWindow(data.url);
+        return;
+      } catch { /* fall through: relay to the app, whose detail view has the link */ }
     }
     const all = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
     const client = all.find((c) => new URL(c.url).origin === location.origin);
