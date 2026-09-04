@@ -73,20 +73,38 @@ async function loadContactPairing(env: Env, pairId: string): Promise<PairRow | n
   return row && row.kind === "contact" ? row : null;
 }
 
+/**
+ * 與 pairing.ts 的 verifyCode 同一個修正(2026-09-04):原本 read → compare → increment
+ * 三步分開,猜對那次還完全不寫入,所以 N 個並行猜測全都看到 attempts = 0,
+ * 三次上限對併發等於不存在。改成先用一句原子的條件式 UPDATE 加次數並取回 code_hash。
+ */
 async function verifyCode(env: Env, row: PairRow, code: string): Promise<Response | null> {
-  if (row.consumed_at !== null) return apiError(410, "invite_consumed", "此邀請已使用過");
-  if (Date.now() > row.expires_at) return apiError(410, "invite_expired", "邀請已過期");
-  if (row.attempts >= PAIR_MAX_ATTEMPTS) return apiError(410, "invite_locked", "錯誤次數過多,邀請已作廢");
-  if (!timingSafeEqual(await codeHash(row.pair_id, code), row.code_hash)) {
-    const upd = await env.DB.prepare(
-      "UPDATE pairings SET attempts = attempts + 1 WHERE pair_id = ? RETURNING attempts",
-    ).bind(row.pair_id).first<{ attempts: number }>();
-    if ((upd?.attempts ?? 0) >= PAIR_MAX_ATTEMPTS) {
+  const claimed = await env.DB.prepare(
+    `UPDATE pairings SET attempts = attempts + 1
+       WHERE pair_id = ? AND consumed_at IS NULL AND expires_at > ? AND attempts < ?
+       RETURNING attempts, code_hash`,
+  ).bind(row.pair_id, Date.now(), PAIR_MAX_ATTEMPTS).first<{ attempts: number; code_hash: string }>();
+
+  if (!claimed) {
+    const cur = await env.DB.prepare("SELECT * FROM pairings WHERE pair_id = ?")
+      .bind(row.pair_id).first<PairRow>();
+    if (!cur) return apiError(404, "not_found", "邀請不存在");
+    if (cur.consumed_at !== null) return apiError(410, "invite_consumed", "此邀請已使用過");
+    if (Date.now() > cur.expires_at) return apiError(410, "invite_expired", "邀請已過期");
+    return apiError(410, "invite_locked", "錯誤次數過多,邀請已作廢");
+  }
+
+  if (!timingSafeEqual(await codeHash(row.pair_id, code), claimed.code_hash)) {
+    if (claimed.attempts >= PAIR_MAX_ATTEMPTS) {
       await env.DB.prepare("UPDATE pairings SET consumed_at = ? WHERE pair_id = ?").bind(Date.now(), row.pair_id).run();
       return apiError(410, "invite_locked", "錯誤次數過多,邀請已作廢");
     }
     return apiError(403, "bad_code", "邀請碼錯誤");
   }
+
+  // 猜對就把剛才那一次加回去,合法流程不該吃掉額度
+  await env.DB.prepare("UPDATE pairings SET attempts = MAX(attempts - 1, 0) WHERE pair_id = ?")
+    .bind(row.pair_id).run();
   return null;
 }
 
