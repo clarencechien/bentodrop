@@ -29,24 +29,49 @@ async function loadPairing(env: Env, pairId: string): Promise<PairRow | null> {
   return env.DB.prepare("SELECT * FROM pairings WHERE pair_id = ?").bind(pairId).first<PairRow>();
 }
 
-/** Shared guardrail check + code verification with attempt counting. */
+/**
+ * Shared guardrail check + code verification with attempt counting.
+ *
+ * ⚠️ 2026-09-04 修正:原本是 read → compare → increment 三步分開,而且**猜對那次完全不寫入**。
+ * 所以 N 個並行請求全都讀到 attempts = 0,「3 次錯誤就作廢」對併發完全無效 ——
+ * 而那三次上限正是這個 6 位數配對碼唯一的保護(檔案開頭就寫著 guardrails ARE the security model)。
+ * 舊測試只涵蓋循序嘗試,所以沒抓到。
+ *
+ * 現在改成:**先用一句原子的條件式 UPDATE 把次數加上去並取回 code_hash**,拿到之後才比對。
+ * D1 的單一 statement 是原子的,所以 N 個並行猜測會拿到 1、2、3…,第四個以後條件不成立、
+ * 直接被擋。猜對的那次把剛才那一次加回去(claim 與 finish 都要用同一組碼,不該吃掉額度)。
+ */
 async function verifyCode(env: Env, row: PairRow, code: string): Promise<Response | null> {
-  const now = Date.now();
-  if (row.consumed_at !== null) return apiError(410, "pairing_consumed", "此配對已使用過");
-  if (now > row.expires_at) return apiError(410, "pairing_expired", "配對已過期");
-  if (row.attempts >= PAIR_MAX_ATTEMPTS) return apiError(410, "pairing_locked", "錯誤次數過多,配對已作廢");
+  const claimed = await env.DB.prepare(
+    `UPDATE pairings SET attempts = attempts + 1
+       WHERE pair_id = ? AND consumed_at IS NULL AND expires_at > ? AND attempts < ?
+       RETURNING attempts, code_hash`,
+  ).bind(row.pair_id, Date.now(), PAIR_MAX_ATTEMPTS).first<{ attempts: number; code_hash: string }>();
+
+  // 條件不成立 → 重讀一次把原因分類出來(這是錯誤路徑,多一次查詢無妨)
+  if (!claimed) {
+    const cur = await loadPairing(env, row.pair_id);
+    if (!cur) return apiError(404, "not_found", "配對不存在");
+    if (cur.consumed_at !== null) return apiError(410, "pairing_consumed", "此配對已使用過");
+    if (Date.now() > cur.expires_at) return apiError(410, "pairing_expired", "配對已過期");
+    return apiError(410, "pairing_locked", "錯誤次數過多,配對已作廢");
+  }
+
   const expected = await pairCodeHash(row.pair_id, code);
-  if (!timingSafeEqual(expected, row.code_hash)) {
-    const upd = await env.DB.prepare(
-      "UPDATE pairings SET attempts = attempts + 1 WHERE pair_id = ? RETURNING attempts",
-    ).bind(row.pair_id).first<{ attempts: number }>();
-    if ((upd?.attempts ?? 0) >= PAIR_MAX_ATTEMPTS) {
+  if (!timingSafeEqual(expected, claimed.code_hash)) {
+    if (claimed.attempts >= PAIR_MAX_ATTEMPTS) {
       // Void the whole pairing after the third wrong try (§6.6).
       await env.DB.prepare("UPDATE pairings SET consumed_at = ? WHERE pair_id = ?").bind(Date.now(), row.pair_id).run();
       return apiError(410, "pairing_locked", "錯誤次數過多,配對已作廢");
     }
     return apiError(403, "bad_code", "配對碼錯誤");
   }
+
+  // 猜對了:把剛才那一次加回去。正常流程 claim 與 finish 會各用一次同一組碼,
+  // 不把它還回去的話,三次額度裡合法流程自己就吃掉兩次。
+  await env.DB.prepare(
+    "UPDATE pairings SET attempts = MAX(attempts - 1, 0) WHERE pair_id = ?",
+  ).bind(row.pair_id).run();
   return null;
 }
 
@@ -80,9 +105,15 @@ export async function pairClaim(req: Request, env: Env): Promise<Response> {
   const guard = await verifyCode(env, row, body.code);
   if (guard) return guard;
 
-  await env.DB.prepare(
-    "UPDATE pairings SET new_pubkey = ?, new_label = ? WHERE pair_id = ?",
-  ).bind(JSON.stringify(body.pubkey_jwk), (body.label ?? "新裝置").slice(0, 64), body.pairId).run();
+  // ⚠️ 只有「還沒被 claim 過」的配對才收。原本沒有這個條件,所以第二個拿到配對碼的人
+  // 可以在舊裝置按下確認**之後**覆寫 new_pubkey,再用 finish 把配對燒掉、換到一張有效的
+  // 裝置 token —— 而擁有者不需要再做任何動作,也不會看到任何異狀。
+  const took = await env.DB.prepare(
+    `UPDATE pairings SET new_pubkey = ?, new_label = ?
+       WHERE pair_id = ? AND new_pubkey IS NULL AND approved_at IS NULL AND consumed_at IS NULL
+       RETURNING pair_id`,
+  ).bind(JSON.stringify(body.pubkey_jwk), (body.label ?? "新裝置").slice(0, 64), body.pairId).first();
+  if (!took) return apiError(409, "already_claimed", "這個配對已經有裝置加入了");
   return json({ ok: true });
 }
 

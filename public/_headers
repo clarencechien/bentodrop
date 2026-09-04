@@ -1,0 +1,16 @@
+# Workers static assets 會讀這個檔。wrangler.jsonc 的 run_worker_first 只涵蓋 /api/*,
+# 所以靜態頁不經過 Worker,標頭只能寫在這裡。
+/*
+  X-Frame-Options: DENY
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: no-referrer
+  Strict-Transport-Security: max-age=31536000; includeSubDomains
+  Permissions-Policy: geolocation=(), camera=(self), microphone=(), payment=()
+  # camera=(self):QR 掃描要用。connect-src 需要 self(API 同源)。
+  # 這個 app 會渲染從聯絡人收到並解密的內容,而 localStorage 裡有裝置 token ——
+  # esc() 是第一道,CSP 是第二道。
+  # ⚠️ style-src / font-src 一定要放行 Google Fonts,否則會擋掉 index.html 自己載的樣式表,
+  # 而且是**靜默**失敗(字型掉回系統字型,沒有任何錯誤浮上來)—— sukemu 就是這樣掉的。
+  # script-src 維持 'self' 沒有 'unsafe-inline':兩頁的 <link onload> 已經拿掉,
+  # 所以不需要 script-src-attr 放行事件屬性(放行等於讓注入的 onerror= 也能跑)。
+  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'

@@ -31,11 +31,21 @@ const b64url = (buf) =>
 sh("npx wrangler deploy");
 
 // ── 2. secrets ────────────────────────────────────────────────────────
+// ⚠️ 2026-09-04 修正:這裡原本 catch 之後只印一句警告、讓 secretList 維持空字串,
+// 於是下面的 missing 判斷會認為三把 secret 全都缺,把它們**全部重新生成並覆蓋**,
+// 包含 VAPID 私鑰 —— 與 README 的「絕不覆蓋已存在的 secrets」完全相反。
+// 後果:任何一次 push 遇到暫時性的 API 錯誤,就會讓所有既有推送訂閱與所有
+// 未過期的簽章 URL 一起失效,而且沒有任何跡象。
+// 列不出來就是「不知道」,不是「沒有」——直接中止,讓人來看。
 let secretList = "";
 try {
   secretList = capture("npx wrangler secret list");
-} catch {
-  console.warn("could not list secrets — assuming none exist yet");
+} catch (e) {
+  console.error("could not list secrets — aborting rather than assuming none exist.");
+  console.error("re-running with existing secrets absent would regenerate the VAPID keypair");
+  console.error("and kill every push subscription. check `npx wrangler whoami` and retry.");
+  console.error(String(e?.message ?? e));
+  process.exit(1);
 }
 // `wrangler secret list` output is JSON-ish; a plain substring check on the
 // exact secret name is format-agnostic and safe (names don't overlap).
