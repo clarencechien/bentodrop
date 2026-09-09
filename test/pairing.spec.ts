@@ -11,7 +11,7 @@ async function createPair(owner: Awaited<ReturnType<typeof createDevice>>) {
 const wrongCode = (code: string) => (code === "000000" ? "111111" : "000000");
 
 describe("happy path", () => {
-  it("hands K_master to the new device; the new device can decrypt", async () => {
+  it("hands the entropy + userName over; the new device re-derives the same K_master", async () => {
     const a = await createDevice();
     const b = await pairNewDevice(a, "MacBook");
     expect(b.userId).toBe(a.userId);
@@ -24,7 +24,7 @@ describe("happy path", () => {
     expect(me.devices).toHaveLength(2);
   });
 
-  it("never stores the pairing code or K_master in the clear", async () => {
+  it("never stores the pairing code in the clear", async () => {
     const a = await createDevice();
     const created = await createPair(a);
     const row = await env.DB.prepare("SELECT * FROM pairings WHERE pair_id = ?")

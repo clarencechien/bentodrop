@@ -298,7 +298,7 @@ function renderOnboarding(next) {
         <button class="btn ghost inline" id="obJoin" type="button">已有其他裝置?配對加入</button>
         <button class="btn ghost inline" id="obRestore" type="button">用還原碼還原</button>
       </div>
-      <p class="btn-note" style="margin-top:10px">在這台的另一個瀏覽器或 App 開通過?選「配對加入」— 重新開通會變成另一個帳號</p>
+      <p class="btn-note" style="margin-top:10px">以前用過但資料不見了?(iOS 長期沒開啟,系統可能清掉本機資料)或在這台的另一個瀏覽器、App 開通過?選「配對加入」或「用還原碼還原」— 重新開通會變成另一個帳號</p>
     </div>`));
   document.getElementById("obForm").onsubmit = async (e) => {
     e.preventDefault();
@@ -1334,12 +1334,14 @@ function renderFriendJoin(pairId, presetCode = null) {
 async function renderBackup() {
   setNav(true);
   const entropy = await kvGet(K.ENTROPY);
+  const userName = await kvGet(K.USER_NAME);
   const words = await C.entropyToMnemonic(entropy);
   const root = el(`
     <div class="compartment" style="max-width:480px;margin:30px auto">
       <p class="eyebrow">備份還原碼</p>
       <h2 style="margin-top:8px">抄下這 12 個字</h2>
-      <p class="small muted" style="margin-top:6px">兩台裝置都遺失時,只有這個能救回來。我們沒有備份,也救不了你。</p>
+      <p class="small muted" style="margin-top:6px">兩台裝置都遺失時,只有這個能救回金鑰。我們沒有備份,也救不了你。</p>
+      <p class="small muted" style="margin-top:6px">⚠ 還原時也要輸入你當初打的名字「<b>${esc(userName)}</b>」——名字是金鑰的一部分,請跟這 12 個字一起記下來。</p>
       <div class="words" id="wordGrid"></div>
       <div class="save-opts" style="grid-template-columns:repeat(5,1fr)">
         <button class="save-opt pri" id="svCopy" type="button">複製</button>
@@ -1359,7 +1361,9 @@ async function renderBackup() {
   root.querySelector("#svCopy").onclick = () => copyText(phrase);
   root.querySelector("#svDl").onclick = () => {
     const a = document.createElement("a");
-    a.href = URL.createObjectURL(new Blob([`BentoDrop 還原碼\n\n${words.map((w, i) => `${i + 1}. ${w}`).join("\n")}\n`], { type: "text/plain" }));
+    a.href = URL.createObjectURL(new Blob([
+      `BentoDrop 還原碼\n\n名字:${userName}\n\n${words.map((w, i) => `${i + 1}. ${w}`).join("\n")}\n\n還原時名字與 12 個字都要輸入,少一個就導不出同一把金鑰。\n`,
+    ], { type: "text/plain" }));
     a.download = "bentodrop-recovery.txt";
     a.click();
     toast("已下載,記得移出下載資料夾");
@@ -1370,7 +1374,7 @@ async function renderBackup() {
         <h3>還原碼 QR</h3>
         <p class="small muted" style="margin-top:6px">用另一台裝置拍下或截圖保存。⚠ 存進相簿的話,相簿可能會自動同步到雲端。</p>
         <div class="qr" style="width:220px;height:220px">${qrSvg(phrase, { label: "還原碼 QR" })}</div>
-        <p class="btn-note">還原時在「用還原碼還原」頁選這張圖即可</p>
+        <p class="btn-note">還原時在「用還原碼還原」頁選這張圖,再輸入名字「${esc(userName)}」</p>
       </div>`);
     modal(box);
   };
@@ -1764,9 +1768,8 @@ async function renderSettings() {
     toast("已清空");
   };
   root.querySelector("#stReset").onclick = async () => {
-    if (!confirm("重設會刪除這台裝置上的金鑰與登入。未備份還原碼且沒有其他裝置的話,資料將永遠無法解密。確定?")) return;
+    if (!confirm("重設會刪除這台裝置上的金鑰與登入。沒有其他裝置可以配對的話,這個帳號與伺服器上的訊息就再也拿不回來 —— 還原碼只能救回金鑰,不會救回舊訊息。確定?")) return;
     for (const key of Object.values(K)) await kvDelete(key);
-    await kvDelete("identityPrivWrapped");
     location.assign("/");
   };
   root.querySelector("#stBack").onclick = () => renderInbox();
