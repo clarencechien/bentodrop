@@ -134,7 +134,8 @@ export async function pairStatus(env: Env, device: DeviceCtx, pairId: string): P
 /**
  * POST /api/pair/:id/approve (device auth — the old device).
  * §6.6: the OLD device must show a confirmation and the user must actively
- * approve; the wrapped K_master is only uploaded here.
+ * approve; the wrapped secret — entropy + userName, which the new device
+ * re-derives K_master from — is only uploaded here.
  */
 export async function pairApprove(req: Request, env: Env, device: DeviceCtx, pairId: string): Promise<Response> {
   const body = await readJson<{ wrapped_blob?: string; old_pubkey?: unknown }>(req);
@@ -155,8 +156,8 @@ export async function pairApprove(req: Request, env: Env, device: DeviceCtx, pai
 
 /**
  * POST /api/pair/finish (no auth — the new device, with the code again).
- * Single-use: hands over the wrapped K_master, creates the device row and
- * its bearer token, then burns the pairing.
+ * Single-use: hands over the wrapped secret (entropy + userName), creates
+ * the device row and its bearer token, then burns the pairing.
  */
 export async function pairFinish(req: Request, env: Env): Promise<Response> {
   const body = await readJson<{ pairId?: string; code?: string }>(req);

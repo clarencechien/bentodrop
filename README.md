@@ -22,7 +22,7 @@ Cloudflare Workers + D1 + R2 + Web Push(VAPID),全 PWA,無帳號系統。
 - **短文字(≤2KB 明文)**:完全不落地,加密後直接塞進 push payload(§3.1)。密文 envelope 同時存一份在 D1(仍是密文),讓其他裝置開 app 時拉得到收件匣(§10 已讀保留)。
 - **檔案/圖片(≤20MB)**:client 加密 → 取得簽名上傳 URL → 直傳 R2 → `/api/send` 回報,Worker `HEAD` 驗證大小(§4.3)→ push 只送指標。
 - **加密(§5)**:每則訊息隨機 CEK(AES-256-GCM),CEK 由 `K_master` 包裹(`wrap.mode: "self"`);`K_master` 由 128-bit 隨機值經 HKDF-SHA256 導出;還原碼為 BIP39 12 詞(§6.2);檔名與 MIME 也加密(`meta.ct`)。
-- **配對(§6.6)**:URL + 6 位數字碼,三條護欄(TTL 5 分鐘、錯 3 次作廢、用完即焚)+ 每小時 5 次限制;`K_master` 以臨時 ECDH P-256 + HKDF 包裹傳遞,Worker 只見密文。
+- **配對(§6.6)**:URL + 6 位數字碼,三條護欄(TTL 5 分鐘、錯 3 次作廢、用完即焚)+ 每小時 5 次限制;交付的是 entropy + 名字(新裝置自己重導 `K_master`),以臨時 ECDH P-256 + HKDF 包裹傳遞,Worker 只見密文。
 - **API 推送(§12)**:send-only token;明文模式 per-token 顯式開啟、純文字 ≤2000 bytes、不落 R2,UI 標示「未加密」,保留期上限 24 小時(§14 待決事項已定案)。加密模式(§12.3)由 `cli/bentodrop-push.mjs` 實作:token 只拿身分**公鑰**,外洩也讀不到任何內容。
 - **跨使用者(§11 Phase 2)**:身分金鑰為 user 層級(公鑰存伺服器、私鑰以 K_master 包裹後同步,伺服器讀不到);加好友沿用 URL+邀請碼機制(TTL 放寬到 30 分鐘,其餘護欄相同);跨 user envelope 用 `wrap.mode: "ecdh-p256"`(臨時金鑰 + HKDF);授權以**收件人**的好友名單為準 — 解除好友即刻擋下對方來訊。送達回執對寄件者隱藏對方裝置名稱。
 - **清理(§10)**:Cron 每 15 分鐘刪過期訊息(D1 列 + R2 物件)與過期配對;R2 lifecycle(7 天)為第二道保險。
@@ -86,7 +86,7 @@ npm run test:all    # 以上全部
 | `crypto.spec.ts` | client 加密:BIP39(與 @scure/bip39 參考實作交叉比對)、checksum 抓錯字、HKDF 導鍵、envelope 往返、每則新 CEK、meta 加密、配對 ECDH 包裹、`https://` 白名單偵測、Android intent:// 產生(https-only、fragment 排除) |
 | `webpush.spec.ts` | RFC 8291 aes128gcm 加密往返、header 格式、4KB 預算;RFC 8292 VAPID JWT 簽章驗證 |
 | `api.spec.ts` | 註冊/認證、文字路徑全鏈路(加密→送出→攔截推送→解 transport→解 envelope)、發送端排除、收件匣已讀保留、跨 user 隔離、檔案路徑全鏈路(§4.3 大小驗證/物件缺失/謊報大小刪物件/簽名竄改/跨 user key)、410 立即刪訂閱、連續失敗 5 次刪除、測試推送、保留期設定、推送端點白名單(含子網域偽裝與 `PUSH_ENDPOINT_ALLOW` 逃生口) |
-| `pairing.spec.ts` | §6.6 三條護欄各自對抗性測試:錯 3 次作廢(對的碼也救不回)、TTL 過期、單次使用(finish 燒毀)、每小時 5 次;code 只存 hash、wrapped blob 交付後清除、未確認前拿不到秘密 |
+| `pairing.spec.ts` | §6.6 三條護欄各自對抗性測試:錯 3 次作廢(對的碼也救不回)、TTL 過期、單次使用(finish 燒毀)、每小時 5 次;code 只存 hash、wrapped blob(entropy + 名字)交付後清除、未確認前拿不到秘密 |
 | `contacts.spec.ts` | §11:身分金鑰單次建立與收斂、私鑰只以密文存放、加好友全流程與護欄(30 分 TTL)、跨 user ecdh 收發(通知 payload 解密 + 收件匣)、非好友 403、解除好友即封鎖、跨 user 檔案下載授權、明文 24h 保留上限 |
 | `cli.spec.ts` | §12.3 CLI 核心對真 Worker 全流程:取公鑰→包裹→推送→只有身分私鑰能解;無身分時的明確錯誤;明文模式權限 |
 | `qr.spec.ts` | 配對 QR 以獨立解碼器(jsQR)往返驗證;fragment 不出瀏覽器 |
@@ -99,7 +99,7 @@ npm run test:all    # 以上全部
 
 真 Chromium 開兩個獨立瀏覽器 context 當兩台裝置,跑在 `wrangler dev` 上(`scripts/e2e-server.sh` 自動產生 `.dev.vars`、套本機 migrations、每次重置本機狀態):
 
-onboarding 單欄位開通與 IndexedDB 持久化、送文字給自己(加密→拉取→解密→複製 UI)、`https://` 才有「開啟連結」且永不自動跳轉、`javascript:` 當純文字、全域刪除、檔案加密上傳/下載解密(檔名解密顯示,走合併上傳流程)、**完整雙裝置配對流程**(QR 連結+配對碼→別名→舊裝置確認→K_master 移轉→跨裝置解密→備份提示)、**加好友流程**(兩個瀏覽器 context 當兩個 user:邀請→輸碼→確認→ecdh 跨 user 收發)、**邀請先於開通**(3 個 context:沒帳號的瀏覽器開邀請→選「配對加入」併入既有帳號→邀請自動續接,全程單一帳號;並驗證邀請碼不會漏進配對表單)、剪貼簿 composer(文字/圖片預覽、即送/送出切換、點預覽編輯)、**share-target**(對真 SW 發文字/圖片/空分享)、通知 action 的 app 端處理(「複製」`copy-msg` 訊息→複製;「查看」冷啟動 `/?m=` →定位訊息詳情,永不自動導航)、**預取快取**(檔案通知到手即背景抓好:點開即現;快取未命中則縮圖預覽+下載按鈕)、收件匣離線首繪(API 掛掉仍先畫上次快取)、備份抽 3 詞驗證、還原碼還原(含 checksum 抓錯 + QR 照片匯入)、裝置改名、landing 頁與安裝橫幅(含 iOS UA:說明 Apple 限制、引導加入主畫面)、設定頁(保留期、API token 建立/未加密標示/實際推送/撤銷、撤銷後從列表消失)、傳輸診斷完整跑一輪(上傳=刪除、報告產出)、Service Worker 註冊與 manifest 可安裝。
+onboarding 單欄位開通與 IndexedDB 持久化、送文字給自己(加密→拉取→解密→複製 UI)、`https://` 才有「開啟連結」且永不自動跳轉、`javascript:` 當純文字、全域刪除、檔案加密上傳/下載解密(檔名解密顯示,走合併上傳流程)、**完整雙裝置配對流程**(QR 連結+配對碼→別名→舊裝置確認→金鑰移轉(entropy + 名字)→跨裝置解密→備份提示)、**加好友流程**(兩個瀏覽器 context 當兩個 user:邀請→輸碼→確認→ecdh 跨 user 收發)、**邀請先於開通**(3 個 context:沒帳號的瀏覽器開邀請→選「配對加入」併入既有帳號→邀請自動續接,全程單一帳號;並驗證邀請碼不會漏進配對表單)、剪貼簿 composer(文字/圖片預覽、即送/送出切換、點預覽編輯)、**share-target**(對真 SW 發文字/圖片/空分享)、通知 action 的 app 端處理(「複製」`copy-msg` 訊息→複製;「查看」冷啟動 `/?m=` →定位訊息詳情,永不自動導航)、**預取快取**(檔案通知到手即背景抓好:點開即現;快取未命中則縮圖預覽+下載按鈕)、收件匣離線首繪(API 掛掉仍先畫上次快取)、備份抽 3 詞驗證、還原碼還原(含 checksum 抓錯 + QR 照片匯入)、裝置改名、landing 頁與安裝橫幅(含 iOS UA:說明 Apple 限制、引導加入主畫面)、設定頁(保留期、API token 建立/未加密標示/實際推送/撤銷、撤銷後從列表消失)、傳輸診斷完整跑一輪(上傳=刪除、報告產出)、Service Worker 註冊與 manifest 可安裝。
 
 Web Push 本身(瀏覽器端訂閱與通知顯示)無法在 headless 環境完整重現,推送管線改由整合測試以真加密驗證;`sw.js` 的解密/通知邏輯與 §6.3 通知隱私開關依 §5.5 設計(解密失敗仍顯示通用通知)。
 
@@ -236,6 +236,17 @@ node cli/bentodrop-push.mjs --plain "磁碟 85%"  # 明文模式(token 需開啟
 - **第二輪(2026-08-28,診斷 + 效能優化上線後)**:針對新增攻擊面 — `/api/diag/*`、合併上傳 intent 流程(含 HMAC 分隔符注入的具體分析)、SW 預取與通知 action、`copy-msg` handler — **零發現**。重點驗證:intent 定案時重查好友關係且失敗即刪物件、diag 刪除鎖在 `diag/{userId}/` 前綴、通知「開啟」雙重 `https://` 把關、預取走同一套下載授權。
 
 第二輪備註提到的 `/api/subscribe` blind-SSRF 面已於後續加固:endpoint 主機名限縮為已知推送服務白名單(FCM / Mozilla / Apple / WNS,防子網域偽裝);自架推送(UnifiedPush / ntfy)可用 `PUSH_ENDPOINT_ALLOW` 環境變數(逗號分隔主機名)加入,不影響任何正常瀏覽器。
+
+### 金鑰儲存與還原路徑查核(2026-09-09)
+
+逐項對照程式碼查核金鑰儲存、K_master 導出鏈、身分私鑰 blast radius 與 iOS 儲存風險,紀錄在 [`docs/key-storage-review.md`](docs/key-storage-review.md)。結論摘要:
+
+- **12 詞單獨外洩不構成冒充** —— 伺服器認證走 device token,拿 12 詞去 `/api/register` 只會開一個新帳號,碰不到原本 user 的密文。12 詞給的是解密能力,不是存取能力。
+- **身分金鑰沒有輪替路徑**(`identity_pub` first-writer-wins),外洩只能重設帳號重建身分。
+- **`navigator.storage.persist()` 早已在開通/配對後呼叫**;改存 non-extractable K_master 會同時廢掉配對與備份,不做。
+- **還原碼只救金鑰,不救帳號** —— 還原會開新 userId,舊訊息與好友拿不回來(UI 文案已對齊)。
+- **名字是 HKDF salt 的一部分**,備份下載檔與 QR 說明已補上名字。
+- iOS 被 ITP 清掉本機資料無法可靠偵測(IndexedDB / Cache / SW 註冊整組一起清),改以開通頁提示涵蓋;埋點會是 false negative,不做。
 
 ## 信任邊界:「端到端」到哪裡為止
 
